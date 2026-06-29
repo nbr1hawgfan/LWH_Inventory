@@ -715,17 +715,29 @@ window.addEventListener('load', function() {
     }).catch(function(){});
   } catch(e) {}
 
-  // Init native BarcodeDetector if available
+  // Init native BarcodeDetector — check supported formats first
   if ('BarcodeDetector' in window) {
-    try {
-      barcodeDetector = new BarcodeDetector({
-        formats: [
-          'code_128', 'code_39', 'code_93',
-          'ean_13', 'ean_8', 'upc_a', 'upc_e',
-          'qr_code', 'data_matrix', 'aztec', 'pdf417'
-        ]
+    BarcodeDetector.getSupportedFormats()
+      .then(function(supported) {
+        // Only request formats the browser actually supports
+        var want = ['code_128','code_39','code_93','ean_13','ean_8',
+                    'upc_a','upc_e','qr_code','data_matrix','pdf417'];
+        var use  = want.filter(function(f){ return supported.indexOf(f) >= 0; });
+        if (use.length > 0) {
+          try {
+            barcodeDetector = new BarcodeDetector({ formats: use });
+            Logger && Logger.log && Logger.log('BarcodeDetector ready, formats: ' + use.join(','));
+          } catch(e) { barcodeDetector = null; }
+        } else {
+          barcodeDetector = null; // no useful formats — go straight to ZXing
+        }
+      })
+      .catch(function() {
+        // getSupportedFormats failed — try with just the two we need
+        try {
+          barcodeDetector = new BarcodeDetector({ formats: ['code_128','code_39'] });
+        } catch(e) { barcodeDetector = null; }
       });
-    } catch(e) { barcodeDetector = null; }
   }
 });
 
@@ -851,16 +863,56 @@ function stopPreviewLoop() {
 }
 
 /* ============================================================
+   BARCODE PREPROCESSING
+   Builds a high-contrast greyscale canvas optimised for linear barcodes.
+   Code 128 / Code 39 both benefit from sharpened high-contrast images.
+============================================================ */
+function getBarcodeCanvas_(srcCanvas) {
+  var sw = srcCanvas.width;
+  var sh = srcCanvas.height;
+
+  // Crop centre strip — barcodes are typically in the aim box area
+  // Use 90% width, 50% height centred — wide enough for any barcode orientation
+  var cw = Math.round(sw * 0.9);
+  var ch = Math.round(sh * 0.5);
+  var cx = Math.round((sw - cw) / 2);
+  var cy = Math.round((sh - ch) / 2);
+
+  var out = document.createElement('canvas');
+  // Scale up 1.5x — helps detection on small barcodes
+  out.width  = Math.round(cw * 1.5);
+  out.height = Math.round(ch * 1.5);
+  var ctx = out.getContext('2d');
+
+  // Greyscale + high contrast — critical for Code 39 especially
+  ctx.filter = 'grayscale(1) contrast(2.0) brightness(1.05)';
+  ctx.drawImage(srcCanvas, cx, cy, cw, ch, 0, 0, out.width, out.height);
+
+  return out;
+}
+
+/* ============================================================
    BARCODE — CONTINUOUS POLLING
    Uses native BarcodeDetector if available, falls back to
    ZXing-style manual frame-grab approach otherwise.
 ============================================================ */
 function startBarcodeLoop() {
-  if (!barcodeDetector) {
-    // No native BarcodeDetector — offer ZXing fallback via CDN
-    loadZXingFallback();
+  // Give BarcodeDetector init a moment if it's still resolving
+  if (typeof barcodeDetector === 'undefined' || barcodeDetector === null) {
+    // Check if it's just not initialised yet (async getSupportedFormats)
+    setTimeout(function() {
+      if (barcodeDetector) {
+        setScanStatus('Scanning (native engine)...', false);
+        barcodeActive = true;
+        pollBarcode();
+      } else {
+        setScanStatus('Loading barcode engine...', true);
+        loadZXingFallback();
+      }
+    }, 600);
     return;
   }
+  setScanStatus('Scanning (native engine)...', false);
   barcodeActive = true;
   pollBarcode();
 }
@@ -872,13 +924,16 @@ function stopBarcodeLoop() {
 
 function pollBarcode() {
   if (!barcodeActive) return;
-  var video = document.getElementById('scanVideo');
-  if (!video.videoWidth || video.paused || video.ended) {
-    barcodeLoop = requestAnimationFrame(pollBarcode);
+  var preview = document.getElementById('scanPreview');
+  if (!preview || !preview.width || !preview.height) {
+    barcodeLoop = setTimeout(function(){ if(barcodeActive) pollBarcode(); }, 100);
     return;
   }
-  var previewCan = document.getElementById('scanPreview');
-  barcodeDetector.detect(previewCan && previewCan.width > 0 ? previewCan : video)
+
+  // Build a high-contrast greyscale copy for better Code 128 / Code 39 detection
+  var bc = getBarcodeCanvas_(preview);
+
+  barcodeDetector.detect(bc)
     .then(function(barcodes) {
       if (!barcodeActive) return;
       if (barcodes && barcodes.length > 0) {
@@ -890,10 +945,10 @@ function pollBarcode() {
           return;
         }
       }
-      // Nothing found — keep polling (throttle to ~15fps)
+      // Nothing yet — poll at ~10fps to give CPU room to breathe
       barcodeLoop = setTimeout(function() {
-        if (barcodeActive) barcodeLoop = requestAnimationFrame(pollBarcode);
-      }, 66);
+        if (barcodeActive) pollBarcode();
+      }, 100);
     })
     .catch(function() {
       // Suppress detect errors, keep going
@@ -909,39 +964,48 @@ var zxingReader = null;
 
 function loadZXingFallback() {
   if (zxingLoaded) { startZXing(); return; }
-  setScanStatus('Loading barcode engine…', true);
+  setScanStatus('Loading barcode engine...', true);
   var s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+  // Use the browser-specific build which handles camera/canvas better
+  s.src = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/umd/index.min.js';
   s.onload = function() {
     zxingLoaded = true;
-    setScanStatus('Scanning for barcodes…', false);
+    setScanStatus('Scanning (ZXing engine)...', false);
     startZXing();
   };
   s.onerror = function() {
-    setScanStatus('Barcode engine unavailable — try Text (OCR) mode', false);
+    // Try older library as last resort
+    var s2 = document.createElement('script');
+    s2.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+    s2.onload = function() { zxingLoaded = true; setScanStatus('Scanning (ZXing fallback)...', false); startZXing(); };
+    s2.onerror = function() { setScanStatus('Barcode engine unavailable — switch to Text (OCR) mode', false); };
+    document.head.appendChild(s2);
   };
   document.head.appendChild(s);
 }
 
 function startZXing() {
   try {
-    var ZXing = window.ZXingBrowser || (window.ZXing && window.ZXing.BrowserMultiFormatReader ? window.ZXing : null);
-    if (!ZXing) {
-      // Try alternate namespace
-      ZXing = window.ZXingBrowser;
+    // @zxing/browser namespace
+    var ReaderClass = null;
+    if (window.ZXingBrowser && window.ZXingBrowser.BrowserMultiFormatReader) {
+      ReaderClass = window.ZXingBrowser.BrowserMultiFormatReader;
+    } else if (window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+      ReaderClass = window.ZXing.BrowserMultiFormatReader;
     }
-    var ReaderClass = (ZXing && ZXing.BrowserMultiFormatReader)
-      ? ZXing.BrowserMultiFormatReader
-      : (window.ZXingBrowser && window.ZXingBrowser.BrowserMultiFormatReader)
-        ? window.ZXingBrowser.BrowserMultiFormatReader
-        : null;
 
     if (!ReaderClass) {
-      setScanStatus('Barcode library loaded but reader unavailable — switch to Text mode', false);
+      setScanStatus('Barcode reader not found — switch to Text mode', false);
       return;
     }
 
-    zxingReader = new ReaderClass();
+    var hints = new Map();
+    // Hint: we expect Code 128 and Code 39 primarily
+    if (window.ZXingBrowser && window.ZXingBrowser.DecodeHintType) {
+      hints.set(window.ZXingBrowser.DecodeHintType.TRY_HARDER, true);
+    }
+
+    zxingReader = new ReaderClass(hints);
     barcodeActive = true;
     pollZXing();
   } catch(e) {
@@ -951,23 +1015,24 @@ function startZXing() {
 
 function pollZXing() {
   if (!barcodeActive || !zxingReader) return;
-  var video  = document.getElementById('scanVideo');
-  var canvas = document.getElementById('scanCanvas');
-  if (!video.videoWidth) {
-    setTimeout(pollZXing, 200);
-    return;
-  }
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
+  var preview = document.getElementById('scanPreview');
+  if (!preview || !preview.width) { setTimeout(pollZXing, 200); return; }
+
+  // Use same preprocessed canvas for ZXing too
+  var bc = getBarcodeCanvas_(preview);
 
   try {
-    zxingReader.decodeFromCanvas(canvas).then(function(result) {
+    var resultPromise = zxingReader.decodeFromCanvas
+      ? zxingReader.decodeFromCanvas(bc)
+      : Promise.resolve(zxingReader.decode(bc));
+
+    resultPromise.then(function(result) {
       if (!barcodeActive) return;
-      if (result && result.getText()) {
+      var text = result && (result.getText ? result.getText() : result.text);
+      if (text) {
         stopBarcodeLoop();
         playBeep();
-        showScanConfirm(result.getText());
+        showScanConfirm(text);
       } else {
         setTimeout(function(){ if (barcodeActive) pollZXing(); }, 150);
       }
