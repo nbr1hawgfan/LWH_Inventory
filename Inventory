@@ -1,0 +1,1788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>LWH Inventory</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+<!-- Tesseract OCR — loaded early so WASM is ready when user taps scan -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+/* ===================== TOKENS ===================== */
+:root {
+  --ink:      #111111;
+  --ink2:     #444444;
+  --ink3:     #888888;
+  --rule:     #e4e4e4;
+  --rule2:    #f0f0f0;
+  --bg:       #f7f7f7;
+  --surface:  #ffffff;
+  --blue:     #2563EB;
+  --blue-lt:  #EEF3FF;
+  --green:    #16a34a;
+  --green-lt: #f0fdf4;
+  --red:      #dc2626;
+  --red-lt:   #fef2f2;
+  --amber:    #d97706;
+  --amber-lt: #fffbeb;
+  --radius:   8px;
+  --radius-lg:14px;
+  --shadow:   0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.10);
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+html { font-size:16px; overflow-x:hidden; width:100%; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); min-height:100vh; -webkit-font-smoothing:antialiased; overflow-x:hidden; width:100%; }
+button { font-family:inherit; cursor:pointer; }
+input  { font-family:inherit; }
+
+/* ===================== NAV ===================== */
+.topnav { background:var(--surface); border-bottom:1.5px solid var(--rule); position:sticky; top:0; z-index:100; }
+.topnav-inner { display:flex; align-items:center; padding:0 14px; height:50px; gap:8px; max-width:1200px; margin:0 auto; min-width:0; overflow:hidden; }
+.brand { font-size:13px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase; color:var(--ink); white-space:nowrap; }
+.brand span { color:var(--blue); }
+.nav-pills { display:flex; gap:3px; flex-shrink:0; }
+.nav-pill { padding:5px 12px; border-radius:20px; font-size:13px; font-weight:600; border:none; background:transparent; color:var(--ink2); white-space:nowrap; }
+.nav-pill.active { background:var(--blue); color:#fff; }
+.nav-stats { margin-left:auto; font-size:11px; color:var(--ink3); text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.nav-stats strong { color:var(--ink); }
+
+/* ===================== SEARCH PANEL ===================== */
+.search-panel { background:var(--surface); border-bottom:1px solid var(--rule); padding:10px 14px 8px; position:sticky; top:50px; z-index:90; overflow:hidden; }
+.search-panel-inner { max-width:1200px; margin:0 auto; }
+.search-box { display:flex; align-items:center; background:var(--bg); border:1.5px solid var(--rule); border-radius:var(--radius); overflow:hidden; transition:border-color 0.15s,box-shadow 0.15s; }
+.search-box:focus-within { border-color:var(--blue); box-shadow:0 0 0 3px rgba(37,99,235,0.10); }
+.search-box input { flex:1; border:none; background:transparent; padding:13px 12px; font-size:16px; color:var(--ink); outline:none; }
+.search-box input::placeholder { color:var(--ink3); }
+.search-clear { background:none; border:none; color:var(--ink3); padding:0 10px; font-size:16px; display:none; align-items:center; cursor:pointer; }
+.search-clear.visible { display:flex; }
+
+/* ---- SCAN BUTTON ---- */
+.scan-btn {
+  background:none; border:none; color:var(--blue);
+  padding:0 12px; font-size:20px; display:flex; align-items:center;
+  cursor:pointer; border-left:1px solid var(--rule); height:100%;
+  min-width:44px; justify-content:center;
+  transition:background 0.12s;
+}
+.scan-btn:active { background:var(--blue-lt); }
+.scan-btn.loading { color:var(--ink3); animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+/* ===================== CHIPS ===================== */
+.chip-row { display:flex; gap:6px; overflow-x:auto; padding-top:8px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.chip-row::-webkit-scrollbar { display:none; }
+.loc-chip { flex-shrink:0; padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; border:1.5px solid var(--rule); background:var(--surface); color:var(--ink2); white-space:nowrap; cursor:pointer; }
+.loc-chip.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+
+/* ===================== CONTENT ===================== */
+.content-area { max-width:1200px; margin:0 auto; padding:12px; overflow:hidden; }
+
+/* ===================== META BAR ===================== */
+.meta-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; min-height:28px; gap:8px; flex-wrap:wrap; }
+.result-label { font-size:13px; font-weight:600; color:var(--ink2); }
+.meta-actions { display:flex; gap:6px; align-items:center; }
+.view-toggle { display:flex; border:1.5px solid var(--rule); border-radius:var(--radius); overflow:hidden; }
+.view-btn { padding:5px 11px; font-size:12px; font-weight:600; border:none; background:var(--surface); color:var(--ink2); border-right:1px solid var(--rule); cursor:pointer; }
+.view-btn:last-child { border-right:none; }
+.view-btn.active { background:var(--ink); color:#fff; }
+.action-btn { padding:6px 13px; font-size:12px; font-weight:600; border-radius:var(--radius); border:1.5px solid var(--rule); background:var(--surface); color:var(--ink2); cursor:pointer; display:flex; align-items:center; gap:4px; }
+.action-btn.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+
+/* ===================== BAY HERO (mobile single result) ===================== */
+.bay-hero-card { background:var(--surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-md); overflow:hidden; margin-bottom:12px; max-width:100%; width:100%; }
+.bay-hero-top { background:var(--ink); color:#fff; padding:20px 16px 18px; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; overflow:hidden; }
+.bay-eyebrow { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:rgba(255,255,255,0.45); margin-bottom:4px; }
+.bay-value-giant { font-size:clamp(36px,10vw,72px); font-weight:900; letter-spacing:-1px; line-height:1; color:var(--blue); overflow:hidden; max-width:55vw; }
+.bay-meta-right { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; max-width:38vw; }
+.qty-pill { display:inline-flex; align-items:center; padding:6px 12px; border-radius:24px; font-size:15px; font-weight:800; background:rgba(255,255,255,0.12); color:#fff; border:1.5px solid rgba(255,255,255,0.2); white-space:nowrap; max-width:100%; }
+.qty-pill.good { background:var(--green); border-color:var(--green); }
+.qty-pill.zero { background:var(--amber); border-color:var(--amber); }
+.qty-pill.hold { background:var(--red);   border-color:var(--red); }
+.loc-pill { font-size:11px; font-weight:700; letter-spacing:0.5px; padding:3px 9px; border-radius:4px; background:rgba(255,255,255,0.12); color:rgba(255,255,255,0.75); text-transform:uppercase; }
+.bay-hero-body { padding:16px 20px; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.bay-hero-desc { padding:0 20px 12px; font-size:13px; color:var(--ink2); line-height:1.5; }
+.bay-hero-foot { padding:10px 20px 16px; border-top:1px solid var(--rule2); display:flex; gap:8px; flex-wrap:wrap; }
+
+/* ===================== MULTI CARD ===================== */
+.inv-card { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); border-left:3px solid var(--rule); padding:12px 14px; margin-bottom:8px; }
+.inv-card.status-good { border-left-color:var(--green); }
+.inv-card.status-zero { border-left-color:var(--amber); }
+.inv-card.status-hold { border-left-color:var(--red); }
+.card-row-top { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:6px; }
+.card-bay { font-size:24px; font-weight:900; letter-spacing:-0.5px; line-height:1; color:var(--ink); }
+.card-right { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.qty-badge { font-size:12px; font-weight:700; padding:3px 9px; border-radius:12px; background:var(--green-lt); color:var(--green); white-space:nowrap; }
+.qty-badge.zero { background:var(--amber-lt); color:var(--amber); }
+.qty-badge.hold { background:var(--red-lt);   color:var(--red); }
+.loc-tag { font-size:10px; font-weight:700; color:var(--ink3); text-transform:uppercase; letter-spacing:0.5px; }
+.card-item { font-size:13px; font-weight:700; color:var(--ink); margin-bottom:2px; }
+.card-desc { font-size:12px; color:var(--ink2); margin-bottom:8px; line-height:1.4; }
+.card-fields { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; }
+.fld { display:flex; flex-direction:column; }
+.fld-label { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.6px; color:var(--ink3); margin-bottom:1px; }
+.fld-value { font-size:12px; font-weight:600; color:var(--ink); }
+.fld-value.mono { font-family:'SF Mono','Courier New',monospace; font-size:11px; }
+.card-footer { display:flex; gap:6px; margin-top:10px; padding-top:8px; border-top:1px solid var(--rule2); flex-wrap:wrap; }
+.card-btn { font-size:11px; font-weight:600; padding:5px 10px; border-radius:6px; border:1.5px solid var(--rule); background:var(--surface); color:var(--ink2); cursor:pointer; }
+.card-btn.blue { background:var(--blue); color:#fff; border-color:var(--blue); }
+.card-expand { display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--rule2); grid-template-columns:1fr 1fr; gap:6px 14px; }
+.card-expand.open { display:grid; }
+
+/* ===================== TABLE ===================== */
+.tbl-wrap { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+.tbl-scroll { overflow-x:auto; }
+table.data-table { width:100%; border-collapse:collapse; font-size:13px; }
+table.data-table thead th { background:var(--ink); color:#fff; padding:9px 13px; text-align:left; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; white-space:nowrap; }
+table.data-table tbody tr { border-bottom:1px solid var(--rule2); cursor:pointer; }
+table.data-table tbody tr:last-child { border-bottom:none; }
+table.data-table tbody tr:hover { background:var(--blue-lt); }
+table.data-table tbody td { padding:9px 13px; color:var(--ink); font-weight:500; white-space:nowrap; }
+.td-bay { font-size:17px; font-weight:900; letter-spacing:-0.3px; }
+.td-mono { font-family:'SF Mono','Courier New',monospace; font-size:11px; }
+.td-desc { max-width:180px; overflow:hidden; text-overflow:ellipsis; color:var(--ink2); }
+.td-qty-good { color:var(--green); font-weight:700; }
+.td-qty-zero { color:var(--amber); font-weight:700; }
+.td-qty-hold { color:var(--red);   font-weight:700; }
+.badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700; }
+.badge-in    { background:var(--green-lt); color:var(--green); }
+.badge-out   { background:var(--red-lt);   color:var(--red); }
+.badge-other { background:var(--rule2);    color:var(--ink2); }
+
+/* ===================== TRANSACTION SEARCH ===================== */
+.txn-panel { display:none; }
+.txn-panel.active { display:block; }
+.txn-search-area { background:var(--surface); border-bottom:1px solid var(--rule); padding:10px 14px 8px; }
+.txn-search-inner { max-width:1200px; margin:0 auto; }
+.section-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.6px; color:var(--ink3); margin-bottom:4px; margin-top:8px; }
+.txn-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+.filter-input { width:100%; background:var(--bg); border:1.5px solid var(--rule); border-radius:var(--radius); padding:8px 10px; font-size:13px; color:var(--ink); outline:none; }
+.filter-input:focus { border-color:var(--blue); }
+.filter-input::-webkit-calendar-picker-indicator { opacity:0.5; cursor:pointer; }
+
+/* ===================== TXN CARD (mobile) ===================== */
+.txn-card { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); border-left:3px solid var(--rule); padding:12px 14px; margin-bottom:8px; }
+.txn-card.dir-in  { border-left-color:var(--green); }
+.txn-card.dir-out { border-left-color:var(--red); }
+.txn-top { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.txn-date { font-size:14px; font-weight:700; color:var(--ink); }
+.txn-cust { font-size:11px; color:var(--ink3); margin-top:1px; }
+.txn-item { font-size:13px; font-weight:700; color:var(--ink); margin-bottom:2px; }
+.txn-desc { font-size:11px; color:var(--ink2); margin-bottom:8px; }
+.txn-fields { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; }
+
+/* ===================== STATES ===================== */
+.state-block { padding:50px 20px; text-align:center; color:var(--ink3); }
+.state-icon  { font-size:36px; margin-bottom:10px; font-weight:700; color:var(--ink3); }
+.state-title { font-size:15px; font-weight:700; color:var(--ink2); margin-bottom:6px; }
+.state-sub   { font-size:13px; line-height:1.5; }
+.spinner { width:34px; height:34px; border:3px solid var(--rule); border-top-color:var(--blue); border-radius:50%; animation:spin 0.65s linear infinite; margin:0 auto 12px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ===================== LOAD MORE ===================== */
+.load-more { width:100%; background:var(--surface); border:1.5px solid var(--rule); border-radius:var(--radius); padding:12px; font-size:13px; font-weight:700; color:var(--ink2); margin-top:4px; cursor:pointer; }
+.load-more:hover { border-color:var(--ink2); color:var(--ink); }
+
+/* ===================== TOAST ===================== */
+.toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(70px); background:var(--ink); color:#fff; padding:9px 18px; border-radius:20px; font-size:13px; font-weight:600; transition:transform 0.25s; z-index:999; white-space:nowrap; box-shadow:var(--shadow-md); }
+.toast.show { transform:translateX(-50%) translateY(0); }
+
+/* ===================== OVERLAY ===================== */
+.overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:300; overflow-y:auto; padding:20px 14px; }
+.overlay.open { display:block; }
+.overlay-box { background:#fff; border-radius:var(--radius-lg); max-width:900px; margin:0 auto; overflow:hidden; }
+.overlay-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1.5px solid var(--rule); gap:10px; }
+.overlay-title { font-size:15px; font-weight:700; color:var(--ink); }
+.overlay-sub   { font-size:11px; color:var(--ink3); margin-top:2px; }
+.overlay-actions { display:flex; gap:6px; flex-shrink:0; }
+.overlay-body { padding:18px 20px; }
+
+/* ===================== LABEL GRID ===================== */
+.label-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.label-card { border:1.5px solid #ccc; border-radius:8px; padding:10px 8px 8px; text-align:center; page-break-inside:avoid; break-inside:avoid; }
+.label-bay    { font-size:22px; font-weight:900; letter-spacing:0.5px; color:var(--ink); margin-bottom:1px; }
+.label-loc    { font-size:9px; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink3); margin-bottom:5px; }
+.label-barcode{ width:100%; margin:3px 0; }
+.label-lwhid  { font-size:10px; font-family:monospace; font-weight:700; color:var(--ink); margin-top:2px; letter-spacing:0.5px; }
+.label-item   { font-size:9px; color:var(--ink2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.label-desc   { font-size:8px; color:var(--ink3); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.label-qty    { display:inline-block; background:var(--ink); color:#fff; font-size:9px; font-weight:700; padding:2px 8px; border-radius:10px; margin-top:4px; }
+
+/* ===================== EXPORT TABLE ===================== */
+.export-scroll { overflow-x:auto; }
+.export-table { width:100%; border-collapse:collapse; font-size:12px; }
+.export-table thead th { background:var(--ink); color:#fff; padding:7px 11px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; }
+.export-table tbody td { padding:6px 11px; border-bottom:1px solid var(--rule2); white-space:nowrap; color:var(--ink); }
+.export-table tbody tr:nth-child(even) td { background:#fafafa; }
+
+/* ===================== PRINT ===================== */
+#print-root { display:none; }
+@media print {
+  @page { margin:10mm; size:auto; }
+  body > *:not(#print-root) { display:none !important; }
+  #print-root { display:block !important; position:static; width:100%; }
+  #print-root .label-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  #print-root .label-card { border:1.5px solid #ccc; border-radius:6px; padding:8px; text-align:center; page-break-inside:avoid; break-inside:avoid; }
+  #print-root .print-export-title { font-size:15px; font-weight:700; margin-bottom:4px; }
+  #print-root .print-export-sub   { font-size:11px; color:#666; margin-bottom:10px; }
+  #print-root .print-export-table { width:100%; border-collapse:collapse; font-size:11px; }
+  #print-root .print-export-table thead th { background:#111 !important; color:#fff !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; padding:6px 9px; text-align:left; font-size:9px; text-transform:uppercase; white-space:nowrap; }
+  #print-root .print-export-table tbody td { padding:5px 9px; border-bottom:1px solid #e4e4e4; white-space:nowrap; }
+  #print-root .print-export-table tbody tr:nth-child(even) td { background:#fafafa; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+
+/* ===================== MOBILE ===================== */
+@media (max-width:599px) {
+  .nav-stats { display:none; }
+  .view-toggle { display:none; }
+  .tbl-wrap { display:none !important; }
+  .topnav, .search-panel, .txn-search-area { max-width:100vw; }
+  .topnav-inner { overflow:visible; gap:6px; padding:0 10px; }
+  .brand { font-size:11px; letter-spacing:1px; }
+  .nav-pill { font-size:12px; padding:5px 10px; }
+  .bay-hero-top { padding:16px 14px 14px; gap:6px; }
+  .bay-hero-body { padding:14px 16px; gap:12px; }
+  .bay-hero-foot { padding:10px 16px 14px; }
+  .bay-hero-desc { padding:0 16px 10px; }
+  .txn-filter-collapse { display:none; }
+  .txn-filter-collapse.open { display:block; }
+  .txn-filter-toggle { width:100%; background:var(--bg); border:1.5px solid var(--rule); border-radius:var(--radius); padding:9px 14px; font-size:13px; font-weight:600; color:var(--ink2); text-align:left; cursor:pointer; margin-top:8px; display:flex; align-items:center; justify-content:space-between; }
+  .txn-filter-toggle span { font-size:11px; }
+  .loc-chip { padding:7px 14px; font-size:13px; }
+  .card-btn  { padding:8px 14px; font-size:12px; }
+  .action-btn { padding:8px 14px; font-size:12px; }
+  .card-bay { font-size:28px; }
+  .meta-bar { flex-direction:column; align-items:flex-start; gap:6px; }
+  .meta-actions { width:100%; justify-content:flex-end; }
+}
+
+/* ===================== DESKTOP ===================== */
+@media (min-width:600px) {
+  .bay-hero-body { grid-template-columns:repeat(3,1fr); }
+  .card-fields   { grid-template-columns:repeat(4,1fr); }
+  .txn-filter-toggle { display:none; }
+  .txn-filter-collapse { display:block !important; }
+  .txn-filter-grid { grid-template-columns:repeat(4,1fr); }
+  .label-grid    { grid-template-columns:repeat(4,1fr); }
+}
+@media (min-width:600px) and (max-width:899px) {
+  .bay-hero-body { grid-template-columns:repeat(2,1fr); }
+}
+
+/* ===================== SCAN MODAL ===================== */
+.scan-modal-bg {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88);
+  z-index:500; flex-direction:column; align-items:center; justify-content:center;
+}
+.scan-modal-bg.open { display:flex; }
+.scan-modal {
+  background:#111; border-radius:16px; overflow:hidden;
+  width:min(420px, 96vw); box-shadow:0 8px 40px rgba(0,0,0,0.6);
+  display:flex; flex-direction:column;
+}
+.scan-modal-header {
+  padding:14px 18px 10px; display:flex; align-items:center; justify-content:space-between;
+}
+.scan-modal-title { font-size:15px; font-weight:700; color:#fff; }
+.scan-modal-sub   { font-size:11px; color:rgba(255,255,255,0.45); margin-top:2px; }
+.scan-close-btn {
+  background:rgba(255,255,255,0.1); border:none; color:#fff;
+  width:32px; height:32px; border-radius:50%; font-size:16px;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  flex-shrink:0;
+}
+/* Viewfinder */
+.scan-viewfinder {
+  position:relative;
+  width:100%;
+  height:260px;
+  overflow:hidden;
+  background:#000;
+  display:block;
+}
+.scan-video {
+  position:absolute;
+  top:0; left:0;
+  width:100%; height:100%;
+  object-fit:cover;
+  display:block;
+  z-index:0;
+}
+/* Aim overlay — corner brackets */
+.scan-aim {
+  position:absolute; inset:0; pointer-events:none;
+  display:flex; align-items:center; justify-content:center;
+  z-index:1;
+}
+.scan-aim-box { position:relative; }
+.scan-aim-box.text-mode    { width:65%; height:60px; }
+.scan-aim-box.barcode-mode { width:80%; height:44px; }
+.scan-aim-box::before, .scan-aim-box::after,
+.scan-aim-box .corner-br, .scan-aim-box .corner-bl {
+  content:''; position:absolute; width:22px; height:22px; border-color:#fff; border-style:solid;
+}
+.scan-aim-box::before  { top:0;    left:0;  border-width:3px 0 0 3px; }
+.scan-aim-box::after   { top:0;    right:0; border-width:3px 3px 0 0; }
+.scan-aim-box .corner-br { bottom:0; right:0; border-width:0 3px 3px 0; }
+.scan-aim-box .corner-bl { bottom:0; left:0;  border-width:0 0 3px 3px; }
+/* Scan line animation */
+.scan-line {
+  position:absolute; left:5%; right:5%; height:2px;
+  background:rgba(37,99,235,0.85);
+  box-shadow:0 0 8px rgba(37,99,235,0.7);
+  animation:scanline 2s ease-in-out infinite;
+  z-index:1;
+}
+@keyframes scanline {
+  0%   { top:15%; opacity:0; }
+  10%  { opacity:1; }
+  90%  { opacity:1; }
+  100% { top:85%; opacity:0; }
+}
+/* Mode toggle row */
+.scan-mode-row {
+  display:flex; gap:0; border-top:1px solid rgba(255,255,255,0.08);
+}
+.scan-mode-btn {
+  flex:1; padding:11px 8px; background:transparent; border:none;
+  color:rgba(255,255,255,0.45); font-size:13px; font-weight:600;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  gap:6px; transition:background 0.15s, color 0.15s;
+  border-right:1px solid rgba(255,255,255,0.08);
+}
+.scan-mode-btn:last-child { border-right:none; }
+.scan-mode-btn.active { background:rgba(37,99,235,0.18); color:#fff; }
+.scan-mode-btn:active { background:rgba(37,99,235,0.3); }
+.scan-mode-icon { font-size:16px; }
+.scan-hint {
+  position:absolute; bottom:10px; left:0; right:0; text-align:center;
+  font-size:11px; color:rgba(255,255,255,0.6); pointer-events:none;
+}
+/* OCR status bar */
+.scan-status {
+  padding:8px 16px; text-align:center;
+  font-size:12px; color:rgba(255,255,255,0.55); min-height:32px;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.scan-status-spinner {
+  width:14px; height:14px; border:2px solid rgba(255,255,255,0.2);
+  border-top-color:var(--blue); border-radius:50%;
+  animation:spin 0.65s linear infinite; flex-shrink:0; display:none;
+}
+.scan-status-spinner.show { display:block; }
+
+/* Confirm step */
+.scan-confirm {
+  display:none; padding:14px 18px 16px; border-top:1px solid rgba(255,255,255,0.08);
+}
+.scan-confirm.show { display:block; }
+.scan-confirm-label {
+  font-size:10px; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.8px; color:rgba(255,255,255,0.4); margin-bottom:6px;
+}
+.scan-confirm-input {
+  width:100%; background:rgba(255,255,255,0.08); border:1.5px solid rgba(255,255,255,0.2);
+  border-radius:8px; padding:11px 13px; font-size:18px; font-weight:700;
+  color:#fff; outline:none; font-family:'SF Mono','Courier New',monospace;
+  letter-spacing:1px; margin-bottom:10px;
+}
+.scan-confirm-input:focus { border-color:var(--blue); }
+.scan-confirm-actions { display:flex; gap:8px; }
+.scan-confirm-search {
+  flex:1; background:var(--blue); color:#fff; border:none;
+  border-radius:8px; padding:13px; font-size:15px; font-weight:700;
+  cursor:pointer;
+}
+.scan-confirm-retry {
+  background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.7);
+  border:1.5px solid rgba(255,255,255,0.15); border-radius:8px;
+  padding:13px 16px; font-size:13px; font-weight:600; cursor:pointer;
+  white-space:nowrap;
+}
+/* Capture button */
+.scan-footer { padding:14px 18px 18px; display:flex; justify-content:center; }
+.scan-capture-btn {
+  width:64px; height:64px; border-radius:50%;
+  background:#fff; border:4px solid rgba(255,255,255,0.25);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:transform 0.1s, background 0.1s;
+  box-shadow:0 0 0 6px rgba(255,255,255,0.08);
+}
+.scan-capture-btn:active { transform:scale(0.93); background:#ddd; }
+.scan-capture-btn svg { width:26px; height:26px; }
+/* hidden canvas for frame capture */
+#scanCanvas { display:none; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="topnav">
+  <div class="topnav-inner">
+    <div class="brand">LWH <span>SEARCH</span></div>
+    <div class="nav-pills">
+      <button class="nav-pill active" id="navInv" onclick="switchTab('inventory')">Inventory</button>
+      <button class="nav-pill" id="navTxn" onclick="switchTab('transactions')">Transactions</button>
+    </div>
+    <div class="nav-stats" id="navStats"></div>
+  </div>
+</nav>
+
+<!-- INVENTORY TAB -->
+<div id="invTab">
+  <div class="search-panel">
+    <div class="search-panel-inner">
+      <div class="search-box">
+        <input type="search" id="invSearch"
+          placeholder="LWH ID, Customer ID, Item, Bay, Description..."
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          inputmode="text" x-autocompletetype="off" pattern="[^\-]*">
+        <button class="search-clear" id="invClear" onclick="invClearSearch()">✕</button>
+        <button class="scan-btn" id="invScanBtn" onclick="openScan('inventory')" title="Scan text with camera">
+          <!-- camera icon -->
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+        </button>
+      </div>
+      <div class="chip-row" id="locChips">
+        <div class="loc-chip active" data-loc="ALL" onclick="setLoc('ALL',this)">All Locations</div>
+      </div>
+    </div>
+  </div>
+  <div class="content-area" id="invContent">
+    <div class="meta-bar" id="invMetaBar" style="display:none">
+      <span class="result-label" id="invResultLabel"></span>
+      <div class="meta-actions">
+        <div class="view-toggle" id="invViewToggle">
+          <button class="view-btn active" id="vBtnCard"  onclick="setInvView('card')">Cards</button>
+          <button class="view-btn"        id="vBtnTable" onclick="setInvView('table')">Table</button>
+        </div>
+        <button class="action-btn primary" id="invPrintBtn" onclick="openInvPrint()" style="display:none">Print Labels</button>
+      </div>
+    </div>
+    <div id="invResults">
+      <div class="state-block">
+        <div class="state-icon">*</div>
+        <div class="state-title">Inventory Search</div>
+        <div class="state-sub">Search by LWH ID, Customer ID,<br>Item, Bay Location, or Description</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TRANSACTIONS TAB -->
+<div id="txnTab" style="display:none">
+  <div class="txn-search-area">
+    <div class="txn-search-inner">
+      <div class="search-box">
+        <input type="search" id="txnSearch"
+          placeholder="INV Receipt, Item, LWHID, Customer, Lot..."
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          inputmode="text" x-autocompletetype="off" pattern="[^\-]*">
+        <button class="search-clear" id="txnClear" onclick="txnClearSearch()">✕</button>
+        <button class="scan-btn" id="txnScanBtn" onclick="openScan('transactions')" title="Scan text with camera">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+        </button>
+      </div>
+      <button class="txn-filter-toggle" id="txnFilterToggle" onclick="toggleTxnFilters()">
+        Filters <span id="txnFilterArrow">+</span>
+      </button>
+      <div class="txn-filter-collapse" id="txnFilterCollapse">
+        <div class="section-label">Customer</div>
+        <div class="chip-row" id="txnCustChips"></div>
+        <div class="section-label">Direction</div>
+        <div class="chip-row" id="txnDirChips"></div>
+        <div class="txn-filter-grid">
+          <div>
+            <div class="section-label">From Date</div>
+            <input type="date" class="filter-input" id="txnDateFrom">
+          </div>
+          <div>
+            <div class="section-label">To Date</div>
+            <input type="date" class="filter-input" id="txnDateTo">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="content-area">
+    <div class="meta-bar" id="txnMetaBar" style="display:none">
+      <span class="result-label" id="txnResultLabel"></span>
+      <div class="meta-actions">
+        <div class="view-toggle">
+          <button class="view-btn active" id="tvBtnTable" onclick="setTxnView('table')">Table</button>
+          <button class="view-btn"        id="tvBtnCard"  onclick="setTxnView('card')">Cards</button>
+        </div>
+        <button class="action-btn primary" id="txnExportBtn" onclick="openTxnExport()" style="display:none">Export / Print</button>
+      </div>
+    </div>
+    <div id="txnResults">
+      <div class="state-block">
+        <div class="state-icon">&lt;&gt;</div>
+        <div class="state-title">Transaction History</div>
+        <div class="state-sub">Search transactions - filtered to exclude Nissan</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ===================== SCAN MODAL ===================== -->
+<div class="scan-modal-bg" id="scanModalBg">
+  <div class="scan-modal">
+    <div class="scan-modal-header">
+      <div>
+        <div class="scan-modal-title" id="scanModalTitle">Scan</div>
+        <div class="scan-modal-sub" id="scanModalSub">Point camera at barcode or unit number</div>
+      </div>
+      <button class="scan-close-btn" onclick="closeScan()">✕</button>
+    </div>
+
+    <div class="scan-viewfinder">
+      <video id="scanVideo" style="display:none" autoplay playsinline muted></video>
+      <canvas id="scanPreview" class="scan-video"></canvas>
+      <div class="scan-aim">
+        <div class="scan-aim-box barcode-mode" id="scanAimBox">
+          <div class="corner-br"></div>
+          <div class="corner-bl"></div>
+        </div>
+      </div>
+      <div class="scan-line" id="scanLine"></div>
+      <div class="scan-hint" id="scanHint">Barcode detected automatically — or tap 📷 for text</div>
+    </div>
+
+    <div class="scan-status">
+      <div class="scan-status-spinner" id="scanSpinner"></div>
+      <span id="scanStatusText">Starting camera…</span>
+    </div>
+
+    <!-- Mode toggle -->
+    <div class="scan-mode-row" id="scanModeRow">
+      <button class="scan-mode-btn active" id="modeBtnBarcode" onclick="setScanMode('barcode')">
+        <span class="scan-mode-icon">▦</span> Barcode
+      </button>
+      <button class="scan-mode-btn" id="modeBtnText" onclick="setScanMode('text')">
+        <span class="scan-mode-icon">Aa</span> Text (OCR)
+      </button>
+    </div>
+
+    <!-- Confirm step — shown after detection -->
+    <div class="scan-confirm" id="scanConfirm">
+      <div class="scan-confirm-label">Detected — edit if needed</div>
+      <input type="text" class="scan-confirm-input" id="scanConfirmInput"
+        autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div class="scan-confirm-actions">
+        <button class="scan-confirm-search" onclick="commitScan()">Search ↵</button>
+        <button class="scan-confirm-retry" onclick="retryScan()">Scan Again</button>
+      </div>
+    </div>
+
+    <!-- Footer: OCR capture button (hidden in barcode mode) -->
+    <div class="scan-footer" id="scanFooter" style="display:none">
+      <button class="scan-capture-btn" id="scanCaptureBtn" onclick="captureAndOCR()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="7"/>
+          <circle cx="12" cy="12" r="3" fill="#111" stroke="none"/>
+        </svg>
+      </button>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px;">Tap to capture text</div>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden canvas for frame capture / barcode polling -->
+<canvas id="scanCanvas"></canvas>
+
+<!-- INVENTORY LABEL OVERLAY -->
+<div class="overlay" id="invLabelOverlay">
+  <div class="overlay-box">
+    <div class="overlay-header">
+      <div>
+        <div class="overlay-title">Barcode Labels</div>
+        <div class="overlay-sub" id="invLabelSub"></div>
+      </div>
+      <div class="overlay-actions">
+        <button class="action-btn primary" onclick="printInvLabels()">Print</button>
+        <button class="action-btn" onclick="closeOverlay('invLabelOverlay')">Close</button>
+      </div>
+    </div>
+    <div class="overlay-body">
+      <div class="label-grid" id="labelGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TRANSACTION EXPORT OVERLAY -->
+<div class="overlay" id="txnExportOverlay">
+  <div class="overlay-box" style="max-width:1100px">
+    <div class="overlay-header">
+      <div>
+        <div class="overlay-title">Transaction Export</div>
+        <div class="overlay-sub" id="txnExportSub"></div>
+      </div>
+      <div class="overlay-actions">
+        <button class="action-btn primary" onclick="downloadTxnCSV()">Download CSV</button>
+        <button class="action-btn primary" onclick="printTxnExport()">Print</button>
+        <button class="action-btn" onclick="closeOverlay('txnExportOverlay')">Close</button>
+      </div>
+    </div>
+    <div class="overlay-body">
+      <div class="export-scroll" id="txnExportWrap"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PRINT ROOT -->
+<div id="print-root"></div>
+
+<script>
+/* ============================================================
+   API CONFIG
+   Set GAS_API_URL to your GAS deployment URL.
+   Get it from: Extensions > Apps Script > Deploy > Manage Deployments
+============================================================ */
+var GAS_API_URL = 'https://script.google.com/macros/s/AKfycbylYacBKzXuDXqOwOdu86FtoJ2k19nPGdMToecrrR5hIx8qhXheAGAIFfgqr37TmBJE/exec';
+
+/* Unified API call — replaces google.script.run
+   Returns a Promise that resolves to the JSON result */
+function api(action, params) {
+  var url = GAS_API_URL + '?action=' + encodeURIComponent(action);
+  if (params) {
+    Object.keys(params).forEach(function(k) {
+      if (params[k] !== undefined && params[k] !== null && params[k] !== '') {
+        url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+      }
+    });
+  }
+  return fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+}
+
+/* ============================================================
+   STATE
+============================================================ */
+var currentTab  = 'inventory';
+var invLoc      = 'ALL';
+var invTimer    = null;
+var invLimit    = 50;
+var invLastQuery= '';
+var invResults  = [];
+var invView     = 'card';
+var txnLoaded   = false;
+var txnCust     = 'ALL';
+var txnDir      = 'ALL';
+var txnLimit    = 100;
+var txnResults  = [];
+var txnView     = 'table';
+var txnTimer    = null;
+var isMobile    = window.innerWidth < 600;
+
+/* ============================================================
+   SCAN STATE
+============================================================ */
+var scanTarget      = 'inventory';   // which tab triggered the scan
+var scanStream      = null;          // MediaStream
+var tesseractWorker = null;          // Tesseract worker (pre-loaded)
+var tesseractReady  = false;
+var scanMode        = 'barcode';     // 'barcode' | 'text'
+var barcodeLoop     = null;          // requestAnimationFrame handle
+var barcodeDetector = null;          // native BarcodeDetector instance
+var barcodeActive   = false;         // whether polling is running
+var lastBeepTime    = 0;             // debounce audio beep
+
+/* Pre-load Tesseract + init BarcodeDetector in the background */
+window.addEventListener('load', function() {
+  isMobile = window.innerWidth < 600;
+  loadStats();
+  loadLocations();
+  initInvSearch();
+
+  // Warm up Tesseract silently
+  try {
+    Tesseract.createWorker('eng', 1, { logger: function(){} }).then(function(w) {
+      tesseractWorker = w; tesseractReady = true;
+    }).catch(function(){});
+  } catch(e) {}
+
+  // Init native BarcodeDetector if available
+  if ('BarcodeDetector' in window) {
+    try {
+      barcodeDetector = new BarcodeDetector({
+        formats: [
+          'code_128', 'code_39', 'code_93',
+          'ean_13', 'ean_8', 'upc_a', 'upc_e',
+          'qr_code', 'data_matrix', 'aztec', 'pdf417'
+        ]
+      });
+    } catch(e) { barcodeDetector = null; }
+  }
+});
+
+/* ============================================================
+   SCAN MODE TOGGLE
+============================================================ */
+function setScanMode(mode) {
+  scanMode = mode;
+  var isBarcode = mode === 'barcode';
+  document.getElementById('modeBtnBarcode').classList.toggle('active',  isBarcode);
+  document.getElementById('modeBtnText')   .classList.toggle('active', !isBarcode);
+  document.getElementById('scanFooter').style.display = isBarcode ? 'none' : 'flex';
+  document.getElementById('scanFooter').style.flexDirection = 'column';
+  document.getElementById('scanFooter').style.alignItems = 'center';
+
+  var aimBox = document.getElementById('scanAimBox');
+  if (isBarcode) {
+    aimBox.className = 'scan-aim-box barcode-mode';
+    document.getElementById('scanHint').textContent = 'Hold steady — barcode detects automatically';
+    setScanStatus('Scanning for barcodes…', false);
+    startBarcodeLoop();
+  } else {
+    aimBox.className = 'scan-aim-box text-mode';
+    document.getElementById('scanHint').textContent = 'Frame the text in the brackets, then tap the button';
+    setScanStatus('Camera ready — tap to capture text', false);
+    stopBarcodeLoop();
+  }
+  // Reset confirm pane on mode switch
+  document.getElementById('scanConfirm').classList.remove('show');
+  document.getElementById('scanCaptureBtn').disabled = false;
+}
+
+
+
+// Listen for result from popup
+;
+
+
+
+
+
+
+
+/* ============================================================
+   SCAN - OPEN / CLOSE
+============================================================ */
+function openScan(target) {
+  scanTarget = target;
+  scanMode   = 'barcode';
+  setScanStatus('Starting camera...', false);
+  document.getElementById('scanConfirm').classList.remove('show');
+  document.getElementById('scanCaptureBtn').disabled = false;
+  document.getElementById('scanFooter').style.display = 'none';
+  document.getElementById('modeBtnBarcode').classList.add('active');
+  document.getElementById('modeBtnText').classList.remove('active');
+  document.getElementById('scanAimBox').className = 'scan-aim-box barcode-mode';
+  document.getElementById('scanHint').textContent = 'Hold steady - barcode detects automatically';
+  document.getElementById('scanModalBg').classList.add('open');
+  navigator.mediaDevices.getUserMedia({
+    video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }
+  }).then(function(stream) {
+    scanStream = stream;
+    var video = document.getElementById('scanVideo');
+    video.srcObject = stream;
+    video.play().then(function() {
+      setScanStatus('Scanning for barcodes...', false);
+      startPreviewLoop();
+      startBarcodeLoop();
+    });
+  }).catch(function(err) {
+    setScanStatus('Camera error: ' + err.message, false);
+  });
+}
+
+function closeScan() {
+  stopBarcodeLoop();
+  stopPreviewLoop();
+  document.getElementById('scanModalBg').classList.remove('open');
+  if (scanStream) { scanStream.getTracks().forEach(function(t){ t.stop(); }); scanStream = null; }
+  document.getElementById('scanVideo').srcObject = null;
+}
+
+function stopCamera() {
+  if (scanStream) { scanStream.getTracks().forEach(function(t){ t.stop(); }); scanStream = null; }
+  document.getElementById('scanVideo').srcObject = null;
+}
+
+function retryScan() {
+  document.getElementById('scanConfirm').classList.remove('show');
+  document.getElementById('scanCaptureBtn').disabled = false;
+  if (scanMode === 'barcode') { setScanStatus('Scanning for barcodes...', false); startBarcodeLoop(); }
+  else setScanStatus('Ready - tap to capture again', false);
+}
+
+/* ============================================================
+   CANVAS PREVIEW LOOP
+   Draws video frames to canvas — bypasses GAS iframe video block
+============================================================ */
+var previewLoop = null;
+
+function startPreviewLoop() {
+  var vid = document.getElementById('scanVideo');
+  var can = document.getElementById('scanPreview');
+  stopPreviewLoop();
+
+  function draw() {
+    if (!scanStream) return;
+    if (vid.videoWidth > 0 && vid.videoHeight > 0) {
+      if (can.width !== vid.videoWidth)   can.width  = vid.videoWidth;
+      if (can.height !== vid.videoHeight) can.height = vid.videoHeight;
+      try { can.getContext('2d').drawImage(vid, 0, 0, can.width, can.height); } catch(e) {}
+    }
+    previewLoop = requestAnimationFrame(draw);
+  }
+
+  draw();
+  vid.addEventListener('loadeddata', draw);
+  vid.addEventListener('playing',    draw);
+}
+
+function stopPreviewLoop() {
+  if (previewLoop) { cancelAnimationFrame(previewLoop); previewLoop = null; }
+}
+
+/* ============================================================
+   BARCODE — CONTINUOUS POLLING
+   Uses native BarcodeDetector if available, falls back to
+   ZXing-style manual frame-grab approach otherwise.
+============================================================ */
+function startBarcodeLoop() {
+  if (!barcodeDetector) {
+    // No native BarcodeDetector — offer ZXing fallback via CDN
+    loadZXingFallback();
+    return;
+  }
+  barcodeActive = true;
+  pollBarcode();
+}
+
+function stopBarcodeLoop() {
+  barcodeActive = false;
+  if (barcodeLoop) { cancelAnimationFrame(barcodeLoop); barcodeLoop = null; }
+}
+
+function pollBarcode() {
+  if (!barcodeActive) return;
+  var video = document.getElementById('scanVideo');
+  if (!video.videoWidth || video.paused || video.ended) {
+    barcodeLoop = requestAnimationFrame(pollBarcode);
+    return;
+  }
+  var previewCan = document.getElementById('scanPreview');
+  barcodeDetector.detect(previewCan && previewCan.width > 0 ? previewCan : video)
+    .then(function(barcodes) {
+      if (!barcodeActive) return;
+      if (barcodes && barcodes.length > 0) {
+        var val = barcodes[0].rawValue;
+        if (val) {
+          stopBarcodeLoop();
+          playBeep();
+          showScanConfirm(val);
+          return;
+        }
+      }
+      // Nothing found — keep polling (throttle to ~15fps)
+      barcodeLoop = setTimeout(function() {
+        if (barcodeActive) barcodeLoop = requestAnimationFrame(pollBarcode);
+      }, 66);
+    })
+    .catch(function() {
+      // Suppress detect errors, keep going
+      barcodeLoop = setTimeout(function() {
+        if (barcodeActive) barcodeLoop = requestAnimationFrame(pollBarcode);
+      }, 200);
+    });
+}
+
+/* ZXing fallback for Safari / older browsers */
+var zxingLoaded = false;
+var zxingReader = null;
+
+function loadZXingFallback() {
+  if (zxingLoaded) { startZXing(); return; }
+  setScanStatus('Loading barcode engine…', true);
+  var s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+  s.onload = function() {
+    zxingLoaded = true;
+    setScanStatus('Scanning for barcodes…', false);
+    startZXing();
+  };
+  s.onerror = function() {
+    setScanStatus('Barcode engine unavailable — try Text (OCR) mode', false);
+  };
+  document.head.appendChild(s);
+}
+
+function startZXing() {
+  try {
+    var ZXing = window.ZXingBrowser || (window.ZXing && window.ZXing.BrowserMultiFormatReader ? window.ZXing : null);
+    if (!ZXing) {
+      // Try alternate namespace
+      ZXing = window.ZXingBrowser;
+    }
+    var ReaderClass = (ZXing && ZXing.BrowserMultiFormatReader)
+      ? ZXing.BrowserMultiFormatReader
+      : (window.ZXingBrowser && window.ZXingBrowser.BrowserMultiFormatReader)
+        ? window.ZXingBrowser.BrowserMultiFormatReader
+        : null;
+
+    if (!ReaderClass) {
+      setScanStatus('Barcode library loaded but reader unavailable — switch to Text mode', false);
+      return;
+    }
+
+    zxingReader = new ReaderClass();
+    barcodeActive = true;
+    pollZXing();
+  } catch(e) {
+    setScanStatus('Barcode error: ' + e.message, false);
+  }
+}
+
+function pollZXing() {
+  if (!barcodeActive || !zxingReader) return;
+  var video  = document.getElementById('scanVideo');
+  var canvas = document.getElementById('scanCanvas');
+  if (!video.videoWidth) {
+    setTimeout(pollZXing, 200);
+    return;
+  }
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  try {
+    zxingReader.decodeFromCanvas(canvas).then(function(result) {
+      if (!barcodeActive) return;
+      if (result && result.getText()) {
+        stopBarcodeLoop();
+        playBeep();
+        showScanConfirm(result.getText());
+      } else {
+        setTimeout(function(){ if (barcodeActive) pollZXing(); }, 150);
+      }
+    }).catch(function() {
+      setTimeout(function(){ if (barcodeActive) pollZXing(); }, 150);
+    });
+  } catch(e) {
+    setTimeout(function(){ if (barcodeActive) pollZXing(); }, 300);
+  }
+}
+
+/* ============================================================
+   BEEP — short audio cue on successful scan
+============================================================ */
+function playBeep() {
+  var now = Date.now();
+  if (now - lastBeepTime < 1000) return; // debounce
+  lastBeepTime = now;
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 1800;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.12);
+  } catch(e) {}
+}
+
+/* ============================================================
+   OCR — CAPTURE + PROCESS
+============================================================ */
+function captureAndOCR() {
+  var video  = document.getElementById('scanVideo');
+  var canvas = document.getElementById('scanCanvas');
+
+  if (!video.videoWidth) {
+    setScanStatus('Camera not ready yet — try again', false);
+    return;
+  }
+
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  // Crop to aim box region (centre 65% wide × 33% tall)
+  var cw = canvas.width, ch = canvas.height;
+  var cropW = Math.round(cw * 0.65), cropH = Math.round(ch * 0.33);
+  var cropX = Math.round((cw - cropW) / 2), cropY = Math.round((ch - cropH) / 2);
+
+  var cropCanvas = document.createElement('canvas');
+  cropCanvas.width  = cropW * 2;
+  cropCanvas.height = cropH * 2;
+  var cropCtx = cropCanvas.getContext('2d');
+  cropCtx.filter = 'grayscale(1) contrast(1.8) brightness(1.1)';
+  cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH,
+                             0, 0, cropCanvas.width, cropCanvas.height);
+
+  document.getElementById('scanCaptureBtn').disabled = true;
+  setScanStatus('Reading text…', true);
+  runOCR(cropCanvas.toDataURL('image/png'));
+}
+
+function runOCR(imageData) {
+  var options = {
+    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -',
+    preserve_interword_spaces: '0'
+  };
+
+  var doOCR = function(worker) {
+    worker.recognize(imageData, options).then(function(result) {
+      var raw   = result.data.text || '';
+      var token = extractBestToken(raw);
+      if (token) {
+        showScanConfirm(token);
+      } else {
+        setScanStatus('Could not read text clearly — try again closer', false);
+        document.getElementById('scanCaptureBtn').disabled = false;
+      }
+    }).catch(function(err) {
+      setScanStatus('OCR error — ' + err.message, false);
+      document.getElementById('scanCaptureBtn').disabled = false;
+    });
+  };
+
+  if (tesseractReady && tesseractWorker) {
+    doOCR(tesseractWorker);
+  } else {
+    Tesseract.createWorker('eng', 1, { logger: function(){} })
+      .then(function(w) { tesseractWorker = w; tesseractReady = true; doOCR(w); })
+      .catch(function(err) {
+        setScanStatus('OCR engine failed: ' + err.message, false);
+        document.getElementById('scanCaptureBtn').disabled = false;
+      });
+  }
+}
+
+/* Best token extraction from raw OCR text */
+function extractBestToken(raw) {
+  var cleaned = raw.replace(/\n/g,' ').replace(/[^A-Za-z0-9 ]/g,'').trim().toUpperCase();
+  if (!cleaned) return '';
+  var tokens = cleaned.split(/\s+/).filter(function(t){ return t.length >= 3; });
+  if (!tokens.length) return cleaned.replace(/\s+/g,'').slice(0,30) || '';
+  var scored = tokens.map(function(t) {
+    var mixed = /[A-Z]/.test(t) && /[0-9]/.test(t);
+    var lenOk = t.length >= 5 && t.length <= 20;
+    return { t:t, score:(mixed?20:0) + (lenOk?10:0) + t.length };
+  });
+  scored.sort(function(a,b){ return b.score - a.score; });
+  return scored[0].t;
+}
+
+/* ============================================================
+   SCAN — CONFIRM + COMMIT
+============================================================ */
+function showScanConfirm(token) {
+  setScanStatus('Detected — confirm or edit below', false);
+  var input = document.getElementById('scanConfirmInput');
+  input.value = token;
+  document.getElementById('scanConfirm').classList.add('show');
+  setTimeout(function(){ input.focus(); input.select(); }, 80);
+}
+
+function commitScan() {
+  var val = document.getElementById('scanConfirmInput').value.trim();
+  if (!val) return;
+  closeScan();
+  if (scanTarget === 'inventory') {
+    var inp = document.getElementById('invSearch');
+    inp.value = val;
+    document.getElementById('invClear').classList.add('visible');
+    invRun(val, invLimit);
+  } else {
+    var inp2 = document.getElementById('txnSearch');
+    inp2.value = val;
+    document.getElementById('txnClear').classList.add('visible');
+    txnRun(100);
+  }
+  showToast('Searching: ' + val);
+}
+
+/* ============================================================
+   SCAN — HELPERS
+============================================================ */
+function setScanStatus(msg, spinning) {
+  document.getElementById('scanStatusText').textContent = msg;
+  document.getElementById('scanSpinner').classList.toggle('show', !!spinning);
+}
+
+/* ============================================================
+   DASH SUPPRESSION
+============================================================ */
+var dashWatchInterval = null;
+
+function stripDashes(el) {
+  if (el.value.indexOf('-') !== -1) el.value = el.value.replace(/-/g, '');
+}
+function startDashWatch(el) {
+  stopDashWatch();
+  dashWatchInterval = setInterval(function(){ stripDashes(el); }, 80);
+}
+function stopDashWatch() {
+  if (dashWatchInterval){ clearInterval(dashWatchInterval); dashWatchInterval = null; }
+}
+
+/* ============================================================
+   INIT SEARCH INPUTS
+============================================================ */
+function initInvSearch() {
+  var inv = document.getElementById('invSearch');
+  inv.addEventListener('focus', function(){ startDashWatch(inv); });
+  inv.addEventListener('blur', function(){
+    stopDashWatch(); stripDashes(inv);
+    setTimeout(function(){ stripDashes(inv); }, 50);
+    setTimeout(function(){ stripDashes(inv); }, 200);
+    setTimeout(function(){ stripDashes(inv); }, 500);
+  });
+  inv.addEventListener('input', function(){
+    var v = inv.value.replace(/-/g,'');
+    document.getElementById('invClear').classList.toggle('visible', v.length > 0);
+    clearTimeout(invTimer);
+    if (!v.trim()){ invShowHint(); return; }
+    if (v.length < 2) return;
+    invTimer = setTimeout(function(){ invRun(v, invLimit); }, 320);
+  });
+}
+
+/* ============================================================
+   STATS + LOCATIONS
+============================================================ */
+function loadStats() {
+  api('getStats').then(function(s){
+    document.getElementById('navStats').innerHTML =
+      '<strong>' + Number(s.totalItems).toLocaleString() + '</strong> items synced ' + s.lastSync;
+  }).catch(function(e){ console.warn('getStats failed:', e); });
+}
+
+function loadLocations() {
+  api('getLocations').then(function(locs){
+    var row = document.getElementById('locChips');
+    row.innerHTML = '';
+    locs.forEach(function(obj){
+      var chip = document.createElement('div');
+      chip.className = 'loc-chip' + (obj.loc === 'ALL' ? ' active' : '');
+      chip.dataset.loc = obj.loc;
+      chip.textContent = obj.loc === 'ALL' ? 'All Locations'
+        : obj.loc + (obj.count ? ' (' + obj.count + ')' : '');
+      chip.onclick = function(){ setLoc(obj.loc, chip); };
+      row.appendChild(chip);
+    });
+  }).catch(function(e) { console.warn('getLocations failed:', e); });
+}
+
+/* ============================================================
+   TAB SWITCHING
+============================================================ */
+function switchTab(tab) {
+  currentTab = tab;
+  var isInv = tab === 'inventory';
+  document.getElementById('invTab').style.display  = isInv ? '' : 'none';
+  document.getElementById('txnTab').style.display  = isInv ? 'none' : '';
+  document.getElementById('navInv').classList.toggle('active',  isInv);
+  document.getElementById('navTxn').classList.toggle('active', !isInv);
+  if (!isInv && !txnLoaded){ txnLoaded = true; loadTxnFilters(); }
+}
+
+function toggleTxnFilters() {
+  var panel = document.getElementById('txnFilterCollapse');
+  var arrow = document.getElementById('txnFilterArrow');
+  var open  = panel.classList.toggle('open');
+  arrow.textContent = open ? '-' : '+';
+}
+
+/* ============================================================
+   INVENTORY
+============================================================ */
+function setLoc(loc, el) {
+  invLoc = loc;
+  document.querySelectorAll('.loc-chip').forEach(function(c){ c.classList.remove('active'); });
+  el.classList.add('active');
+  var q = document.getElementById('invSearch').value;
+  if (q.length >= 2) invRun(q, invLimit);
+}
+
+function invClearSearch() {
+  document.getElementById('invSearch').value = '';
+  document.getElementById('invClear').classList.remove('visible');
+  invShowHint();
+}
+
+function invRun(query, limit) {
+  invLastQuery = query; invLimit = limit;
+  invShowLoading();
+  api('searchInventory', { query: query, location: invLoc, limit: limit })
+    .then(invRender)
+    .catch(function(e){ invShowError(e.message); });
+}
+
+function setInvView(v) {
+  invView = v;
+  document.getElementById('vBtnCard') .classList.toggle('active', v === 'card');
+  document.getElementById('vBtnTable').classList.toggle('active', v === 'table');
+  invPaint(invResults, invLimit);
+}
+
+function invRender(res) {
+  if (!res.success){ invShowError(res.error); return; }
+  invResults = res.data;
+  var count  = res.count;
+  if (isMobile || count === 1) invView = 'card';
+  else if (count > 4)          invView = 'table';
+  document.getElementById('vBtnCard') .classList.toggle('active', invView === 'card');
+  document.getElementById('vBtnTable').classList.toggle('active', invView === 'table');
+  var meta = document.getElementById('invMetaBar');
+  meta.style.display = count > 0 ? 'flex' : 'none';
+  document.getElementById('invResultLabel').textContent = count === 0 ? '' :
+    count === 1 ? '1 result' :
+    count + ' results' + (count >= invLimit ? ' (showing ' + invLimit + ')' : '');
+  document.getElementById('invPrintBtn').style.display = count > 0 ? '' : 'none';
+  if (count === 0){
+    document.getElementById('invResults').innerHTML =
+      '<div class="state-block"><div class="state-icon">o</div>' +
+      '<div class="state-title">No results</div>' +
+      '<div class="state-sub">Try a different search term or location filter</div></div>';
+    return;
+  }
+  invPaint(res.data, count);
+}
+
+function invPaint(data, count) {
+  var html = '';
+  if (invView === 'card'){
+    if (data.length === 1) html = buildBayHero(data[0]);
+    else data.forEach(function(item,idx){ html += buildCard(item,idx); });
+  } else {
+    html = buildInvTable(data);
+  }
+  if ((count || data.length) >= invLimit)
+    html += '<button class="load-more" onclick="invRun(invLastQuery,' + (invLimit+50) + ')">Load more results</button>';
+  document.getElementById('invResults').innerHTML = html;
+}
+
+/* ============================================================
+   BAY HERO
+============================================================ */
+function buildBayHero(item) {
+  var isHold = item.holdStatus && item.holdStatus.toLowerCase() === 'yes';
+  var qty    = parseFloat(item.qty) || 0;
+  var qCls   = isHold ? 'hold' : (qty === 0 ? 'zero' : 'good');
+  var qLabel = isHold ? 'HOLD' : 'Qty ' + qty;
+  return '<div class="bay-hero-card">' +
+    '<div class="bay-hero-top">' +
+      '<div>' +
+        '<div class="bay-eyebrow">Bay Location</div>' +
+        '<div class="bay-value-giant">' + esc(item.bayLocation || '--') + '</div>' +
+      '</div>' +
+      '<div class="bay-meta-right">' +
+        '<div class="qty-pill ' + qCls + '">' + esc(qLabel) + '</div>' +
+        '<div class="loc-pill">' + esc(item.location) + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="bay-hero-body">' +
+      fld('Item',        item.item,            false) +
+      fld('LWH ID',     item.lwhId,            true)  +
+      fld('Customer ID',item.customerId,        true)  +
+      fld('PO / Lot',   item.poLot,            false) +
+      fld('Receipt',    item.inventoryReceipt, false) +
+      fld('Vendor',     item.vendor,           false) +
+    '</div>' +
+    (item.description ? '<div class="bay-hero-desc">' + esc(item.description) + '</div>' : '') +
+    '<div class="bay-hero-foot">' +
+      '<button class="card-btn blue" onclick="printOneLabel(0)">Print Label</button>' +
+      '<button class="card-btn" onclick="copyText(\'' + esc(item.lwhId) + '\')">Copy LWH ID</button>' +
+    '</div>' +
+  '</div>';
+}
+
+/* ============================================================
+   MULTI CARD
+============================================================ */
+function buildCard(item, idx) {
+  var isHold = item.holdStatus && item.holdStatus.toLowerCase() === 'yes';
+  var qty    = parseFloat(item.qty) || 0;
+  var sCls   = isHold ? 'status-hold' : (qty === 0 ? 'status-zero' : 'status-good');
+  var qCls   = isHold ? 'hold' : (qty === 0 ? 'zero' : '');
+  var qLabel = isHold ? 'HOLD' : 'Qty ' + qty;
+  return '<div class="inv-card ' + sCls + '" id="card-' + idx + '">' +
+    '<div class="card-row-top">' +
+      '<div class="card-bay">' + esc(item.bayLocation || '--') + '</div>' +
+      '<div class="card-right">' +
+        '<div class="qty-badge ' + qCls + '">' + esc(qLabel) + '</div>' +
+        '<div class="loc-tag">' + esc(item.location) + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card-item">' + esc(item.item || '--') + '</div>' +
+    (item.description ? '<div class="card-desc">' + esc(item.description) + '</div>' : '') +
+    '<div class="card-fields">' +
+      fld('LWH ID',      item.lwhId,           true)  +
+      fld('Customer ID', item.customerId,       true)  +
+      fld('PO / Lot',    item.poLot,           false) +
+      fld('Receipt',     item.inventoryReceipt,false) +
+    '</div>' +
+    '<div class="card-footer">' +
+      '<button class="card-btn" onclick="copyText(\'' + esc(item.lwhId) + '\')">Copy LWH ID</button>' +
+      '<button class="card-btn" onclick="toggleExpand(event,' + idx + ')">More</button>' +
+      '<button class="card-btn blue" onclick="printOneLabel(' + idx + ')">Label</button>' +
+    '</div>' +
+    '<div class="card-expand" id="xp-' + idx + '">' +
+      fld('Sub Customer', item.subCust,           false) +
+      fld('Vendor',       item.vendor,            false) +
+      fld('Hold Status',  item.holdStatus || 'No',false) +
+    '</div>' +
+  '</div>';
+}
+
+/* ============================================================
+   INVENTORY TABLE
+============================================================ */
+function buildInvTable(data) {
+  var html = '<div class="tbl-wrap"><div class="tbl-scroll"><table class="data-table">' +
+    '<thead><tr><th>Bay</th><th>Loc</th><th>Item</th><th>Description</th>' +
+    '<th>LWH ID</th><th>Customer ID</th><th>Qty</th><th></th></tr></thead><tbody>';
+  data.forEach(function(item, idx){
+    var isHold = item.holdStatus && item.holdStatus.toLowerCase() === 'yes';
+    var qty    = parseFloat(item.qty) || 0;
+    var qCls   = isHold ? 'td-qty-hold' : (qty === 0 ? 'td-qty-zero' : 'td-qty-good');
+    var qLabel = isHold ? 'HOLD' : qty;
+    html += '<tr onclick="jumpToCard(' + idx + ')">' +
+      '<td class="td-bay">'          + esc(item.bayLocation || '--') + '</td>' +
+      '<td>'                         + esc(item.location)            + '</td>' +
+      '<td style="font-weight:600">' + esc(item.item || '--')        + '</td>' +
+      '<td class="td-desc">'         + esc(item.description || '--') + '</td>' +
+      '<td class="td-mono">'         + esc(item.lwhId)               + '</td>' +
+      '<td class="td-mono">'         + esc(item.customerId || '--')  + '</td>' +
+      '<td class="' + qCls + '">'    + qLabel                        + '</td>' +
+      '<td><button class="card-btn" onclick="event.stopPropagation();copyText(\'' + esc(item.lwhId) + '\')">Copy</button></td>' +
+    '</tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+
+function jumpToCard(idx) {
+  setInvView('card');
+  setTimeout(function(){
+    var el = document.getElementById('card-' + idx);
+    if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 60);
+}
+
+function toggleExpand(e, idx) {
+  if (e) e.stopPropagation();
+  var el = document.getElementById('xp-' + idx);
+  if (el) el.classList.toggle('open');
+}
+
+function fld(label, value, mono) {
+  return '<div class="fld">' +
+    '<div class="fld-label">' + label + '</div>' +
+    '<div class="fld-value' + (mono ? ' mono' : '') + '">' + esc(value || '--') + '</div>' +
+    '</div>';
+}
+
+/* ============================================================
+   INVENTORY PRINT
+============================================================ */
+function openInvPrint(){ buildLabels(invResults); }
+function printOneLabel(idx){ buildLabels([invResults[idx]]); }
+
+function buildLabels(items) {
+  var q = document.getElementById('invSearch').value;
+  document.getElementById('invLabelSub').textContent =
+    '"' + q + '" - ' + items.length + ' label' + (items.length !== 1 ? 's' : '') +
+    ' - ' + new Date().toLocaleDateString();
+  var html = '';
+  items.forEach(function(item){
+    if (!item) return;
+    html += '<div class="label-card">' +
+      '<div class="label-bay">'   + esc(item.bayLocation || '--') + '</div>' +
+      '<div class="label-loc">'   + esc(item.location)            + '</div>' +
+      '<svg class="label-barcode" id="bc-' + esc(item.lwhId) + '"></svg>' +
+      '<div class="label-lwhid">' + esc(item.lwhId)              + '</div>' +
+      '<div class="label-item">'  + esc(item.item)                + '</div>' +
+      (item.description ? '<div class="label-desc">' + esc(item.description) + '</div>' : '') +
+      '<div class="label-qty">Qty: ' + (parseFloat(item.qty) || 0) + '</div>' +
+    '</div>';
+  });
+  document.getElementById('labelGrid').innerHTML = html;
+  document.getElementById('invLabelOverlay').classList.add('open');
+  setTimeout(function(){
+    items.forEach(function(item){
+      if (!item || !item.lwhId) return;
+      var el = document.getElementById('bc-' + item.lwhId);
+      if (!el) return;
+      try { JsBarcode(el, item.lwhId, { format:'CODE128', width:1.8, height:45, displayValue:false, margin:2 }); }
+      catch(e){ el.style.display = 'none'; }
+    });
+  }, 100);
+}
+
+function printInvLabels() {
+  var grid = document.getElementById('labelGrid');
+  var w = window.open('', '_blank');
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<title>Barcode Labels</title>' +
+    '<style>' +
+    'body{font-family:Arial,sans-serif;margin:12px;}' +
+    '.label-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}' +
+    '.label-card{border:1.5px solid #ccc;border-radius:8px;padding:10px 8px 8px;text-align:center;page-break-inside:avoid;break-inside:avoid;}' +
+    '.label-bay{font-size:22px;font-weight:900;letter-spacing:0.5px;color:#111;margin-bottom:1px;}' +
+    '.label-loc{font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#888;margin-bottom:5px;}' +
+    '.label-barcode{width:100%;margin:3px 0;}' +
+    '.label-lwhid{font-size:10px;font-family:monospace;font-weight:700;color:#111;margin-top:2px;}' +
+    '.label-item{font-size:9px;color:#444;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+    '.label-desc{font-size:8px;color:#888;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+    '.label-qty{display:inline-block;background:#111;color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;margin-top:4px;}' +
+    '@media print{@page{margin:10mm;} body{margin:0;}}' +
+    '</style></head><body>' +
+    '<div class="label-grid">' + grid.innerHTML + '</div>' +
+    '</body></html>');
+  w.document.close();
+  setTimeout(function(){ w.focus(); w.print(); }, 500);
+}
+
+/* ============================================================
+   TRANSACTION FILTERS
+============================================================ */
+function loadTxnFilters() {
+  api('getTxnSubCustomers').then(function(list){
+    var row = document.getElementById('txnCustChips');
+    row.innerHTML = '';
+    list.forEach(function(obj){
+      var chip = document.createElement('div');
+      chip.className = 'loc-chip' + (obj.name === 'ALL' ? ' active' : '');
+      chip.textContent = obj.name === 'ALL' ? 'All Customers'
+        : obj.name + (obj.count ? ' (' + obj.count + ')' : '');
+      chip.onclick = function(){
+        document.querySelectorAll('#txnCustChips .loc-chip').forEach(function(c){ c.classList.remove('active'); });
+        chip.classList.add('active'); txnCust = obj.name; txnRun(100);
+      };
+      row.appendChild(chip);
+    });
+  }).catch(function(e) { console.warn('getTxnSubCustomers failed:', e); });
+
+  api('getTxnDirections').then(function(dirs){
+    var row = document.getElementById('txnDirChips');
+    row.innerHTML = '';
+    dirs.forEach(function(dir){
+      var chip = document.createElement('div');
+      chip.className = 'loc-chip' + (dir === 'ALL' ? ' active' : '');
+      chip.textContent = dir === 'ALL' ? 'All Directions' : dir;
+      chip.onclick = function(){
+        document.querySelectorAll('#txnDirChips .loc-chip').forEach(function(c){ c.classList.remove('active'); });
+        chip.classList.add('active'); txnDir = dir; txnRun(100);
+      };
+      row.appendChild(chip);
+    });
+  }).catch(function(e) { console.warn('getTxnDirections failed:', e); });
+
+  var si = document.getElementById('txnSearch');
+  si.addEventListener('focus', function(){ startDashWatch(si); });
+  si.addEventListener('blur', function(){
+    stopDashWatch(); stripDashes(si);
+    setTimeout(function(){ stripDashes(si); }, 50);
+    setTimeout(function(){ stripDashes(si); }, 200);
+    setTimeout(function(){ stripDashes(si); }, 500);
+  });
+  si.addEventListener('input', function(){
+    var v = si.value.replace(/-/g,'');
+    document.getElementById('txnClear').classList.toggle('visible', v.length > 0);
+    clearTimeout(txnTimer);
+    txnTimer = setTimeout(function(){ txnRun(100); }, 380);
+  });
+  document.getElementById('txnDateFrom').addEventListener('change', function(){ txnRun(100); });
+  document.getElementById('txnDateTo').addEventListener('change',   function(){ txnRun(100); });
+}
+
+function txnClearSearch() {
+  document.getElementById('txnSearch').value = '';
+  document.getElementById('txnClear').classList.remove('visible');
+  document.getElementById('txnMetaBar').style.display = 'none';
+  document.getElementById('txnResults').innerHTML =
+    '<div class="state-block"><div class="state-icon">&lt;&gt;</div>' +
+    '<div class="state-title">Transaction History</div>' +
+    '<div class="state-sub">Search transactions - filtered to exclude Nissan</div></div>';
+}
+
+/* ============================================================
+   TRANSACTION SEARCH
+============================================================ */
+function txnRun(limit) {
+  txnLimit = limit;
+  var params = {
+    query:     document.getElementById('txnSearch').value.trim(),
+    subCust:   txnCust === 'ALL' ? '' : txnCust,
+    direction: txnDir,
+    dateFrom:  document.getElementById('txnDateFrom').value,
+    dateTo:    document.getElementById('txnDateTo').value,
+    limit:     limit
+  };
+  document.getElementById('txnResults').innerHTML =
+    '<div class="state-block"><div class="spinner"></div>Searching...</div>';
+  document.getElementById('txnMetaBar').style.display = 'none';
+  api('searchTransactions', params)
+    .then(txnRender)
+    .catch(function(e){
+      document.getElementById('txnResults').innerHTML =
+        '<div class="state-block"><div class="state-icon">!</div>' +
+        '<div class="state-title">Error</div><div class="state-sub">' + esc(e.message) + '</div></div>';
+    });
+}
+
+function setTxnView(v) {
+  txnView = v;
+  document.getElementById('tvBtnTable').classList.toggle('active', v === 'table');
+  document.getElementById('tvBtnCard') .classList.toggle('active', v === 'card');
+  txnPaint(txnResults, txnLimit);
+}
+
+/* ============================================================
+   TRANSACTION RENDER
+============================================================ */
+function txnRender(res) {
+  if (!res.success){
+    document.getElementById('txnResults').innerHTML =
+      '<div class="state-block"><div class="state-icon">!</div>' +
+      '<div class="state-title">Error</div><div class="state-sub">' + esc(res.error) + '</div></div>';
+    return;
+  }
+  txnResults = res.data;
+  var count  = res.count;
+  if (isMobile) txnView = 'card';
+  document.getElementById('tvBtnTable').classList.toggle('active', txnView === 'table');
+  document.getElementById('tvBtnCard') .classList.toggle('active', txnView === 'card');
+  var meta = document.getElementById('txnMetaBar');
+  meta.style.display = count > 0 ? 'flex' : 'none';
+  document.getElementById('txnResultLabel').textContent = count === 0 ? '' :
+    count + ' transaction' + (count !== 1 ? 's' : '') + (count >= txnLimit ? ' (showing ' + txnLimit + ')' : '');
+  document.getElementById('txnExportBtn').style.display = count > 0 ? '' : 'none';
+  if (count === 0){
+    document.getElementById('txnResults').innerHTML =
+      '<div class="state-block"><div class="state-icon">o</div>' +
+      '<div class="state-title">No results</div>' +
+      '<div class="state-sub">Try adjusting your search or filters</div></div>';
+    return;
+  }
+  txnPaint(res.data, count);
+}
+
+function txnPaint(data, count) {
+  var html = txnView === 'table' ? buildTxnTable(data) : '';
+  if (txnView === 'card') data.forEach(function(txn){ html += buildTxnCard(txn); });
+  if ((count || data.length) >= txnLimit)
+    html += '<button class="load-more" onclick="txnRun(' + (txnLimit+100) + ')">Load more transactions</button>';
+  document.getElementById('txnResults').innerHTML = html;
+}
+
+function buildTxnTable(data) {
+  var html = '<div class="tbl-wrap"><div class="tbl-scroll"><table class="data-table">' +
+    '<thead><tr><th>Date</th><th>Dir</th><th>Customer</th><th>Item</th><th>Description</th>' +
+    '<th>Qty</th><th>INV Receipt</th><th>LWHID</th><th>Lot #</th><th>Bill To Ref</th><th>Vendor</th><th>Location</th>' +
+    '</tr></thead><tbody>';
+  data.forEach(function(r){
+    var dir    = (r.direction || '').toUpperCase();
+    var bdgCls = dir === 'IN' ? 'badge-in' : dir === 'OUT' ? 'badge-out' : 'badge-other';
+    html += '<tr>' +
+      '<td style="font-weight:600">' + esc(r.shippedDate     || '--') + '</td>' +
+      '<td><span class="badge ' + bdgCls + '">' + esc(r.direction || '?') + '</span></td>' +
+      '<td>'                         + esc(r.subCustNm        || '--') + '</td>' +
+      '<td style="font-weight:600">' + esc(r.itemNm           || '--') + '</td>' +
+      '<td class="td-desc">'         + esc(r.itemDescription  || '--') + '</td>' +
+      '<td style="font-weight:700">' + esc(r.qty              || '0')  + '</td>' +
+      '<td class="td-mono">'         + esc(r.invReceipt       || '--') + '</td>' +
+      '<td class="td-mono">'         + esc(r.lwhId            || '--') + '</td>' +
+      '<td class="td-mono">'         + esc(r.lotNum           || '--') + '</td>' +
+      '<td class="td-mono">'         + esc(r.billToRefNum     || '--') + '</td>' +
+      '<td>'                         + esc(r.vendor           || '--') + '</td>' +
+      '<td>'                         + esc(r.location         || '--') + '</td>' +
+    '</tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+
+function buildTxnCard(txn) {
+  var dir    = (txn.direction || '').toUpperCase();
+  var dCls   = dir === 'IN' ? 'dir-in' : dir === 'OUT' ? 'dir-out' : '';
+  var bdgCls = dir === 'IN' ? 'badge-in' : dir === 'OUT' ? 'badge-out' : 'badge-other';
+  return '<div class="txn-card ' + dCls + '">' +
+    '<div class="txn-top">' +
+      '<div>' +
+        '<div class="txn-date">' + esc(txn.shippedDate || '--') + '</div>' +
+        '<div class="txn-cust">' + esc(txn.subCustNm)           + '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;align-items:center">' +
+        '<span style="font-size:14px;font-weight:700">' + esc(txn.qty) + '</span>' +
+        '<span class="badge ' + bdgCls + '">' + esc(txn.direction || '?') + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="txn-item">' + esc(txn.itemNm || '--') + '</div>' +
+    (txn.itemDescription ? '<div class="txn-desc">' + esc(txn.itemDescription) + '</div>' : '') +
+    '<div class="txn-fields">' +
+      fld('INV Receipt', txn.invReceipt,    true)  +
+      fld('LWHID',       txn.lwhId,         true)  +
+      fld('Lot #',       txn.lotNum,        true)  +
+      fld('Bill To Ref', txn.billToRefNum, false)  +
+      fld('Customer ID', txn.customerId,    true)  +
+      fld('Location',    txn.location,     false)  +
+    '</div>' +
+  '</div>';
+}
+
+/* ============================================================
+   TRANSACTION EXPORT
+============================================================ */
+function openTxnExport() {
+  var sub = txnResults.length + ' transactions - ' + new Date().toLocaleDateString();
+  document.getElementById('txnExportSub').textContent = sub;
+  var cols = ['Date','Dir','Customer','Item','Description','Qty','INV Receipt','LWHID','Lot Num','Bill To Ref','Customer ID','Vendor','Location'];
+  var html = '<table class="export-table"><thead><tr>' +
+    cols.map(function(c){ return '<th>' + c + '</th>'; }).join('') +
+    '</tr></thead><tbody>';
+  txnResults.forEach(function(r){
+    html += '<tr>' +
+      '<td>' + esc(r.shippedDate     || '') + '</td>' +
+      '<td>' + esc(r.direction       || '') + '</td>' +
+      '<td>' + esc(r.subCustNm       || '') + '</td>' +
+      '<td>' + esc(r.itemNm          || '') + '</td>' +
+      '<td>' + esc(r.itemDescription || '') + '</td>' +
+      '<td>' + esc(r.qty             || '') + '</td>' +
+      '<td>' + esc(r.invReceipt      || '') + '</td>' +
+      '<td>' + esc(r.lwhId           || '') + '</td>' +
+      '<td>' + esc(r.lotNum          || '') + '</td>' +
+      '<td>' + esc(r.billToRefNum    || '') + '</td>' +
+      '<td>' + esc(r.customerId      || '') + '</td>' +
+      '<td>' + esc(r.vendor          || '') + '</td>' +
+      '<td>' + esc(r.location        || '') + '</td>' +
+    '</tr>';
+  });
+  document.getElementById('txnExportWrap').innerHTML = html + '</tbody></table>';
+  document.getElementById('txnExportOverlay').classList.add('open');
+}
+
+function printTxnExport() {
+  var sub  = txnResults.length + ' transactions - ' + new Date().toLocaleDateString();
+  var cols = ['Date','Dir','Customer','Item','Description','Qty','INV Receipt','LWHID','Lot Num','Bill To Ref','Customer ID','Vendor','Location'];
+  var rows = '';
+  txnResults.forEach(function(r){
+    rows += '<tr>' +
+      '<td>' + esc(r.shippedDate     || '') + '</td>' +
+      '<td>' + esc(r.direction       || '') + '</td>' +
+      '<td>' + esc(r.subCustNm       || '') + '</td>' +
+      '<td>' + esc(r.itemNm          || '') + '</td>' +
+      '<td>' + esc(r.itemDescription || '') + '</td>' +
+      '<td>' + esc(r.qty             || '') + '</td>' +
+      '<td>' + esc(r.invReceipt      || '') + '</td>' +
+      '<td>' + esc(r.lwhId           || '') + '</td>' +
+      '<td>' + esc(r.lotNum          || '') + '</td>' +
+      '<td>' + esc(r.billToRefNum    || '') + '</td>' +
+      '<td>' + esc(r.customerId      || '') + '</td>' +
+      '<td>' + esc(r.vendor          || '') + '</td>' +
+      '<td>' + esc(r.location        || '') + '</td>' +
+    '</tr>';
+  });
+  var w = window.open('', '_blank');
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<title>LWH Transaction Export</title>' +
+    '<style>' +
+    'body{font-family:Arial,sans-serif;margin:20px;font-size:12px;}' +
+    'h2{font-size:16px;font-weight:700;margin-bottom:4px;}' +
+    'p{font-size:11px;color:#666;margin-bottom:14px;}' +
+    'table{width:100%;border-collapse:collapse;font-size:11px;}' +
+    'thead th{background:#111;color:#fff;padding:7px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;}' +
+    'tbody td{padding:6px 10px;border-bottom:1px solid #e4e4e4;white-space:nowrap;}' +
+    'tbody tr:nth-child(even) td{background:#fafafa;}' +
+    '@media print{@page{margin:10mm;size:landscape;} body{margin:0;} thead th{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}' +
+    '</style></head><body>' +
+    '<h2>LWH Transaction Export</h2><p>' + sub + '</p>' +
+    '<table><thead><tr>' +
+    cols.map(function(c){ return '<th>' + c + '</th>'; }).join('') +
+    '</tr></thead><tbody>' + rows + '</tbody></table>' +
+    '</body></html>');
+  w.document.close();
+  setTimeout(function(){ w.focus(); w.print(); }, 500);
+}
+
+function downloadTxnCSV() {
+  var cols = ['Date','Direction','Sub Customer','Item','Item Description','Qty','INV Receipt','LWHID','Lot Num','Bill To Ref Num','Customer ID','Vendor','Location'];
+  var csv  = [cols.join(',')];
+  txnResults.forEach(function(r){
+    csv.push([
+      r.shippedDate, r.direction, r.subCustNm, r.itemNm, r.itemDescription,
+      r.qty, r.invReceipt, r.lwhId, r.lotNum, r.billToRefNum,
+      r.customerId, r.vendor, r.location
+    ].map(function(v){
+      var s = String(v || '');
+      return (s.indexOf(',') > -1 || s.indexOf('"') > -1)
+        ? '"' + s.replace(/"/g,'""') + '"' : s;
+    }).join(','));
+  });
+  var blob = new Blob([csv.join('\n')], { type:'text/csv' });
+  var a    = document.createElement('a');
+  a.href   = URL.createObjectURL(blob);
+  a.download = 'lwh_transactions_' + fmtDate(new Date()) + '.csv';
+  a.click();
+}
+
+/* ============================================================
+   SHARED UTILS
+============================================================ */
+function closeOverlay(id){ document.getElementById(id).classList.remove('open'); }
+
+function copyText(val) {
+  if (navigator.clipboard){
+    navigator.clipboard.writeText(val).then(function(){ showToast('Copied: ' + val); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = val; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast('Copied: ' + val);
+  }
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2200);
+}
+
+function invShowHint() {
+  document.getElementById('invMetaBar').style.display = 'none';
+  document.getElementById('invResults').innerHTML =
+    '<div class="state-block"><div class="state-icon">*</div>' +
+    '<div class="state-title">Inventory Search</div>' +
+    '<div class="state-sub">Search by LWH ID, Customer ID,<br>Item, Bay Location, or Description</div></div>';
+}
+function invShowLoading() {
+  document.getElementById('invResults').innerHTML =
+    '<div class="state-block"><div class="spinner"></div>Searching...</div>';
+}
+function invShowError(msg) {
+  document.getElementById('invResults').innerHTML =
+    '<div class="state-block"><div class="state-icon">!</div>' +
+    '<div class="state-title">Error</div><div class="state-sub">' + esc(msg) + '</div></div>';
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0');
+}
+</script>
+</body>
+</html>
