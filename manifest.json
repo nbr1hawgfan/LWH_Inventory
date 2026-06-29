@@ -2,9 +2,10 @@
   "name": "LWH Inventory Search",
   "short_name": "LWH Search",
   "description": "LWH Warehouse inventory and transaction lookup",
-  "start_url": "/LWH_Inventory/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
-  "background_color": "#f7f7f7",
+  "background_color": "#111111",
   "theme_color": "#111111",
   "orientation": "portrait-primary",
   "icons": [
