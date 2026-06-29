@@ -695,112 +695,150 @@ var isMobile    = window.innerWidth < 600;
 /* ============================================================
    SCAN STATE
 ============================================================ */
-var scanTarget      = 'inventory';   // which tab triggered the scan
-var scanStream      = null;          // MediaStream
-var tesseractWorker = null;          // Tesseract worker (pre-loaded)
+var scanTarget      = 'inventory';
+var scanStream      = null;
+var tesseractWorker = null;
 var tesseractReady  = false;
-var scanMode        = 'barcode';     // 'barcode' | 'text'
-var barcodeLoop     = null;          // requestAnimationFrame handle
-var barcodeDetector = null;          // native BarcodeDetector instance
-var barcodeActive   = false;         // whether polling is running
-var lastBeepTime    = 0;             // debounce audio beep
+var scanMode        = 'barcode';
+var barcodeLoop     = null;
+var barcodeDetector = null;
+var barcodeActive   = false;
+var lastBeepTime    = 0;
+var previewLoop     = null;
 
-/* Pre-load Tesseract + init BarcodeDetector in the background */
+/* ============================================================
+   BARCODE PREPROCESSING
+============================================================ */
+function getBarcodeCanvas_(srcCanvas) {
+  var sw = srcCanvas.width;
+  var sh = srcCanvas.height;
+  var cw = Math.round(sw * 0.9);
+  var ch = Math.round(sh * 0.5);
+  var cx = Math.round((sw - cw) / 2);
+  var cy = Math.round((sh - ch) / 2);
+  var out = document.createElement('canvas');
+  out.width  = Math.round(cw * 1.5);
+  out.height = Math.round(ch * 1.5);
+  var ctx = out.getContext('2d');
+  ctx.filter = 'grayscale(1) contrast(2.0) brightness(1.05)';
+  ctx.drawImage(srcCanvas, cx, cy, cw, ch, 0, 0, out.width, out.height);
+  return out;
+}
+
+/* ============================================================
+   BARCODE LOOP
+============================================================ */
+function startBarcodeLoop() {
+  stopBarcodeLoop();
+  barcodeActive = true;
+  if (barcodeDetector) {
+    setScanStatus('Scanning...', false);
+    pollBarcode();
+  } else {
+    loadPolyfill();
+  }
+}
+
+function stopBarcodeLoop() {
+  barcodeActive = false;
+  if (barcodeLoop) { clearTimeout(barcodeLoop); cancelAnimationFrame(barcodeLoop); barcodeLoop = null; }
+}
+
+function pollBarcode() {
+  if (!barcodeActive || !barcodeDetector) return;
+  var preview = document.getElementById('scanPreview');
+  if (!preview || !preview.width || !preview.height) {
+    barcodeLoop = setTimeout(function(){ if (barcodeActive) pollBarcode(); }, 150);
+    return;
+  }
+  var bc = getBarcodeCanvas_(preview);
+  barcodeDetector.detect(bc)
+    .then(function(codes) {
+      if (!barcodeActive) return;
+      if (codes && codes.length > 0 && codes[0].rawValue) {
+        stopBarcodeLoop();
+        playBeep();
+        showScanConfirm(codes[0].rawValue);
+      } else {
+        barcodeLoop = setTimeout(function(){ if (barcodeActive) pollBarcode(); }, 100);
+      }
+    })
+    .catch(function() {
+      barcodeLoop = setTimeout(function(){ if (barcodeActive) pollBarcode(); }, 200);
+    });
+}
+
+/* ============================================================
+   POLYFILL FALLBACK
+   @undecaf/barcode-detector-polyfill - ZBar WASM based,
+   works on all browsers including iOS Safari
+============================================================ */
+var polyfillLoaded = false;
+
+function loadPolyfill() {
+  if (polyfillLoaded) { initPolyfill(); return; }
+  setScanStatus('Loading barcode engine...', true);
+  var s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.23/dist/index.js';
+  s.onload = function() { polyfillLoaded = true; initPolyfill(); };
+  s.onerror = function() {
+    var s2 = document.createElement('script');
+    s2.src = 'https://unpkg.com/@undecaf/barcode-detector-polyfill@0.9.23/dist/index.js';
+    s2.onload = function() { polyfillLoaded = true; initPolyfill(); };
+    s2.onerror = function() {
+      setScanStatus('Barcode engine failed - try Text (OCR) mode', false);
+    };
+    document.head.appendChild(s2);
+  };
+  document.head.appendChild(s);
+}
+
+function initPolyfill() {
+  try {
+    var Poly = window.BarcodeDetectorPolyfill ||
+               (window.barcodeDetectorPolyfill && window.barcodeDetectorPolyfill.BarcodeDetectorPolyfill);
+    if (!Poly) {
+      setScanStatus('Barcode engine unavailable - try Text (OCR) mode', false);
+      return;
+    }
+    barcodeDetector = new Poly({
+      formats: ['code_128', 'code_39', 'code_93',
+                'ean_13', 'ean_8', 'upc_a', 'upc_e',
+                'qr_code', 'pdf417']
+    });
+    setScanStatus('Scanning...', false);
+    pollBarcode();
+  } catch(e) {
+    setScanStatus('Engine error: ' + e.message, false);
+  }
+}
+
+
+/* Init on page load */
 window.addEventListener('load', function() {
   isMobile = window.innerWidth < 600;
   loadStats();
   loadLocations();
   initInvSearch();
 
-  // Warm up Tesseract silently
-  try {
-    Tesseract.createWorker('eng', 1, { logger: function(){} }).then(function(w) {
-      tesseractWorker = w; tesseractReady = true;
-    }).catch(function(){});
-  } catch(e) {}
-
-  // Init native BarcodeDetector — check supported formats first
+  // Init BarcodeDetector synchronously
   if ('BarcodeDetector' in window) {
-    BarcodeDetector.getSupportedFormats()
-      .then(function(supported) {
-        // Only request formats the browser actually supports
-        var want = ['code_128','code_39','code_93','ean_13','ean_8',
-                    'upc_a','upc_e','qr_code','data_matrix','pdf417'];
-        var use  = want.filter(function(f){ return supported.indexOf(f) >= 0; });
-        if (use.length > 0) {
-          try {
-            barcodeDetector = new BarcodeDetector({ formats: use });
-            Logger && Logger.log && Logger.log('BarcodeDetector ready, formats: ' + use.join(','));
-          } catch(e) { barcodeDetector = null; }
-        } else {
-          barcodeDetector = null; // no useful formats — go straight to ZXing
-        }
-      })
-      .catch(function() {
-        // getSupportedFormats failed — try with just the two we need
-        try {
-          barcodeDetector = new BarcodeDetector({ formats: ['code_128','code_39'] });
-        } catch(e) { barcodeDetector = null; }
+    try {
+      barcodeDetector = new BarcodeDetector({
+        formats: ['code_128', 'code_39', 'code_93',
+                  'ean_13', 'ean_8', 'upc_a', 'upc_e',
+                  'qr_code', 'data_matrix', 'pdf417']
       });
+    } catch(e) { barcodeDetector = null; }
   }
+
+  // Warm Tesseract
+  try {
+    Tesseract.createWorker('eng', 1, { logger: function(){} })
+      .then(function(w){ tesseractWorker = w; tesseractReady = true; })
+      .catch(function(){});
+  } catch(e) {}
 });
-
-/* ============================================================
-   SCAN MODE TOGGLE
-============================================================ */
-function setScanMode(mode) {
-  scanMode = mode;
-  var isBarcode = mode === 'barcode';
-  var isQR      = mode === 'qr';
-  var isText    = mode === 'text';
-
-  // Update mode buttons
-  document.getElementById('modeBtnBarcode').classList.toggle('active', isBarcode);
-  document.getElementById('modeBtnQR')     .classList.toggle('active', isQR);
-  document.getElementById('modeBtnText')   .classList.toggle('active', isText);
-
-  // Show OCR capture button only in text mode
-  var sf = document.getElementById('scanFooter');
-  sf.style.display        = isText ? 'flex' : 'none';
-  sf.style.flexDirection  = 'column';
-  sf.style.alignItems     = 'center';
-
-  // Set aim box shape
-  var aimBox = document.getElementById('scanAimBox');
-  if (isQR)      aimBox.className = 'scan-aim-box qr-mode';
-  else if (isText) aimBox.className = 'scan-aim-box text-mode';
-  else             aimBox.className = 'scan-aim-box barcode-mode';
-
-  // Update hint
-  var hint = document.getElementById('scanHint');
-  if (isQR)        hint.textContent = 'Centre the QR code in the square';
-  else if (isText) hint.textContent = 'Frame the text in the brackets, then tap';
-  else             hint.textContent = 'Hold steady — barcode reads automatically';
-
-  // Reset confirm pane
-  document.getElementById('scanConfirm').classList.remove('show');
-  document.getElementById('scanCaptureBtn').disabled = false;
-
-  // Start/stop the right engine
-  if (isText) {
-    stopBarcodeLoop();
-    setScanStatus('Camera ready — tap to capture text', false);
-  } else {
-    setScanStatus('Scanning for ' + (isQR ? 'QR codes' : 'barcodes') + '...', false);
-    startBarcodeLoop();
-  }
-}
-
-
-
-// Listen for result from popup
-;
-
-
-
-
-
-
 
 /* ============================================================
    SCAN - OPEN / CLOSE
@@ -813,9 +851,10 @@ function openScan(target) {
   document.getElementById('scanCaptureBtn').disabled = false;
   document.getElementById('scanFooter').style.display = 'none';
   document.getElementById('modeBtnBarcode').classList.add('active');
+  document.getElementById('modeBtnQR').classList.remove('active');
   document.getElementById('modeBtnText').classList.remove('active');
-  document.getElementById('scanAimBox').className = 'scan-aim-box barcode-mode'; // default to barcode on open
-  document.getElementById('scanHint').textContent = 'Hold steady — barcode reads automatically';
+  document.getElementById('scanAimBox').className = 'scan-aim-box barcode-mode';
+  document.getElementById('scanHint').textContent = 'Hold steady - barcode reads automatically';
   document.getElementById('scanModalBg').classList.add('open');
   navigator.mediaDevices.getUserMedia({
     video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }
@@ -824,7 +863,7 @@ function openScan(target) {
     var video = document.getElementById('scanVideo');
     video.srcObject = stream;
     video.play().then(function() {
-      setScanStatus('Scanning for barcodes...', false);
+      setScanStatus('Starting scanner...', false);
       startPreviewLoop();
       startBarcodeLoop();
     });
@@ -853,10 +892,8 @@ function retryScan() {
     setScanStatus('Scanning for ' + (scanMode === 'qr' ? 'QR codes' : 'barcodes') + '...', false);
     startBarcodeLoop();
   } else {
-    setScanStatus('Ready — tap to capture again', false);
+    setScanStatus('Ready - tap to capture again', false);
   }
-}
-  else setScanStatus('Ready - tap to capture again', false);
 }
 
 /* ============================================================
