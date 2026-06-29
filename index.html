@@ -319,6 +319,7 @@ table.data-table tbody td { padding:9px 13px; color:var(--ink); font-weight:500;
 .scan-aim-box { position:relative; }
 .scan-aim-box.text-mode    { width:65%; height:60px; }
 .scan-aim-box.barcode-mode { width:80%; height:44px; }
+.scan-aim-box.qr-mode      { width:200px; height:200px; }
 .scan-aim-box::before, .scan-aim-box::after,
 .scan-aim-box .corner-br, .scan-aim-box .corner-bl {
   content:''; position:absolute; width:22px; height:22px; border-color:#fff; border-style:solid;
@@ -569,6 +570,9 @@ table.data-table tbody td { padding:9px 13px; color:var(--ink); font-weight:500;
       <button class="scan-mode-btn active" id="modeBtnBarcode" onclick="setScanMode('barcode')">
         <span class="scan-mode-icon">▦</span> Barcode
       </button>
+      <button class="scan-mode-btn" id="modeBtnQR" onclick="setScanMode('qr')">
+        <span class="scan-mode-icon">⊞</span> QR
+      </button>
       <button class="scan-mode-btn" id="modeBtnText" onclick="setScanMode('text')">
         <span class="scan-mode-icon">Aa</span> Text (OCR)
       </button>
@@ -747,16 +751,19 @@ window.addEventListener('load', function() {
 function setScanMode(mode) {
   scanMode = mode;
   var isBarcode = mode === 'barcode';
-  document.getElementById('modeBtnBarcode').classList.toggle('active',  isBarcode);
-  document.getElementById('modeBtnText')   .classList.toggle('active', !isBarcode);
-  document.getElementById('scanFooter').style.display = isBarcode ? 'none' : 'flex';
+  var isQR      = mode === 'qr';
+  var isText    = mode === 'text';
+  document.getElementById('modeBtnBarcode').classList.toggle('active', isBarcode);
+  document.getElementById('modeBtnQR')     .classList.toggle('active', isQR);
+  document.getElementById('modeBtnText')   .classList.toggle('active', isText);
+  document.getElementById('scanFooter').style.display = (isBarcode || isQR) ? 'none' : 'flex';
   document.getElementById('scanFooter').style.flexDirection = 'column';
   document.getElementById('scanFooter').style.alignItems = 'center';
 
   var aimBox = document.getElementById('scanAimBox');
   if (isBarcode) {
-    aimBox.className = 'scan-aim-box barcode-mode';
-    document.getElementById('scanHint').textContent = 'Hold steady — barcode detects automatically';
+    aimBox.className = 'scan-aim-box ' + (isQR ? 'qr-mode' : isBarcode ? 'barcode-mode' : 'text-mode');
+    document.getElementById('scanHint').textContent = 'Hold steady — reads barcodes and QR codes automatically';
     setScanStatus('Scanning for barcodes…', false);
     startBarcodeLoop();
   } else {
@@ -793,8 +800,8 @@ function openScan(target) {
   document.getElementById('scanFooter').style.display = 'none';
   document.getElementById('modeBtnBarcode').classList.add('active');
   document.getElementById('modeBtnText').classList.remove('active');
-  document.getElementById('scanAimBox').className = 'scan-aim-box barcode-mode';
-  document.getElementById('scanHint').textContent = 'Hold steady - barcode detects automatically';
+  document.getElementById('scanAimBox').className = 'scan-aim-box barcode-mode'; // default to barcode on open
+  document.getElementById('scanHint').textContent = 'Hold steady - reads barcodes and QR codes automatically';
   document.getElementById('scanModalBg').classList.add('open');
   navigator.mediaDevices.getUserMedia({
     video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }
@@ -828,7 +835,7 @@ function stopCamera() {
 function retryScan() {
   document.getElementById('scanConfirm').classList.remove('show');
   document.getElementById('scanCaptureBtn').disabled = false;
-  if (scanMode === 'barcode') { setScanStatus('Scanning for barcodes...', false); startBarcodeLoop(); }
+  if (scanMode === 'barcode' || scanMode === 'qr') { setScanStatus('Scanning for ' + (scanMode === 'qr' ? 'QR codes' : 'barcodes') + '...', false); startBarcodeLoop(); }
   else setScanStatus('Ready - tap to capture again', false);
 }
 
