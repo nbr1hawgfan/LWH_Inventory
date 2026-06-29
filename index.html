@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="LWH Search">
+<meta name="theme-color" content="#111111">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>LWH Inventory</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
 <!-- Tesseract OCR — loaded early so WASM is ready when user taps scan -->
@@ -839,6 +844,46 @@ window.addEventListener('load', function() {
       .catch(function(){});
   } catch(e) {}
 });
+
+/* ============================================================
+   SCAN MODE TOGGLE
+============================================================ */
+function setScanMode(mode) {
+  scanMode = mode;
+  var isBarcode = mode === 'barcode';
+  var isQR      = mode === 'qr';
+  var isText    = mode === 'text';
+
+  document.getElementById('modeBtnBarcode').classList.toggle('active', isBarcode);
+  document.getElementById('modeBtnQR')     .classList.toggle('active', isQR);
+  document.getElementById('modeBtnText')   .classList.toggle('active', isText);
+
+  var sf = document.getElementById('scanFooter');
+  sf.style.display       = isText ? 'flex' : 'none';
+  sf.style.flexDirection = 'column';
+  sf.style.alignItems    = 'center';
+
+  var aimBox = document.getElementById('scanAimBox');
+  if (isQR)        aimBox.className = 'scan-aim-box qr-mode';
+  else if (isText) aimBox.className = 'scan-aim-box text-mode';
+  else             aimBox.className = 'scan-aim-box barcode-mode';
+
+  var hint = document.getElementById('scanHint');
+  if (isQR)        hint.textContent = 'Centre the QR code in the square';
+  else if (isText) hint.textContent = 'Frame the text in the brackets, then tap';
+  else             hint.textContent = 'Hold steady - barcode reads automatically';
+
+  document.getElementById('scanConfirm').classList.remove('show');
+  document.getElementById('scanCaptureBtn').disabled = false;
+
+  if (isText) {
+    stopBarcodeLoop();
+    setScanStatus('Camera ready - tap to capture text', false);
+  } else {
+    setScanStatus('Scanning for ' + (isQR ? 'QR codes' : 'barcodes') + '...', false);
+    startBarcodeLoop();
+  }
+}
 
 /* ============================================================
    SCAN - OPEN / CLOSE
@@ -1911,6 +1956,17 @@ function fmtDate(d) {
   return d.getFullYear() + '-' +
     String(d.getMonth()+1).padStart(2,'0') + '-' +
     String(d.getDate()).padStart(2,'0');
+}
+</script>
+
+<script>
+/* PWA — register service worker */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js')
+      .then(function(reg) { console.log('SW registered:', reg.scope); })
+      .catch(function(err) { console.log('SW failed:', err); });
+  });
 }
 </script>
 </body>
