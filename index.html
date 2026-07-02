@@ -420,6 +420,22 @@ table.data-table tbody td { padding:9px 13px; color:var(--ink); font-weight:500;
 .scan-capture-btn svg { width:26px; height:26px; }
 /* hidden canvas for frame capture */
 #scanCanvas { display:none; }
+
+
+
+
+/* ===================== USER PICKER ===================== */
+.user-picker-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:600; align-items:center; justify-content:center; }
+.user-picker-bg.open { display:flex; }
+.user-picker { background:#fff; border-radius:12px; padding:24px 20px 20px; width:min(320px,90vw); box-shadow:0 8px 40px rgba(0,0,0,0.3); }
+.user-picker h2 { font-size:16px; font-weight:800; color:#111; margin-bottom:4px; }
+.user-picker p  { font-size:12px; color:#666; margin-bottom:16px; }
+.user-picker select { width:100%; padding:11px 12px; font-size:15px; border:1.5px solid #ddd; border-radius:6px; color:#111; outline:none; margin-bottom:14px; background:#fff; }
+.user-picker select:focus { border-color:var(--red, #2563EB); }
+.user-picker-btn { width:100%; padding:13px; background:var(--red, #2563EB); color:#fff; border:none; border-radius:6px; font-size:15px; font-weight:700; cursor:pointer; }
+.user-chip { font-size:11px; color:#888; padding:3px 0; }
+.user-chip strong { color:#111; }
+.user-change { background:none; border:none; color:var(--red, #2563EB); font-size:11px; cursor:pointer; text-decoration:underline; margin-left:6px; }
 </style>
 </head>
 <body>
@@ -433,6 +449,7 @@ table.data-table tbody td { padding:9px 13px; color:var(--ink); font-weight:500;
       <button class="nav-pill" id="navTxn" onclick="switchTab('transactions')">Transactions</button>
     </div>
     <div class="nav-stats" id="navStats"></div>
+    <div id="userChip"></div>
   </div>
 </nav>
 
@@ -540,6 +557,27 @@ table.data-table tbody td { padding:9px 13px; color:var(--ink); font-weight:500;
 </div>
 
 <div class="toast" id="toast"></div>
+
+
+<!-- USER PICKER -->
+<div class="user-picker-bg" id="userPickerBg">
+  <div class="user-picker">
+    <h2>Who are you?</h2>
+    <p>Select your name so we can track app usage. This only appears once.</p>
+    <select id="userSelect">
+      <option value="">— Select your name —</option>
+      <option>Tim Jennings</option>
+      <option>Ronnie</option>
+      <option>Doug</option>
+      <option>Chris Morland</option>
+      <option>Derek Dixon</option>
+      <option>Other Manager</option>
+      <option>Other Director</option>
+      <option>Warehouse Staff</option>
+    </select>
+    <button class="user-picker-btn" onclick="saveUser()">Continue</button>
+  </div>
+</div>
 
 <!-- ===================== SCAN MODAL ===================== -->
 <div class="scan-modal-bg" id="scanModalBg">
@@ -697,6 +735,45 @@ var txnView     = 'table';
 var txnTimer    = null;
 var isMobile    = window.innerWidth < 600;
 
+
+/* ============================================================
+   USER IDENTIFICATION
+   One-time prompt, stored in localStorage
+============================================================ */
+var CURRENT_USER = '';
+
+function initUser() {
+  CURRENT_USER = localStorage.getItem('lwh_user') || '';
+  if (!CURRENT_USER) {
+    document.getElementById('userPickerBg').classList.add('open');
+  } else {
+    showUserChip();
+  }
+}
+
+function saveUser() {
+  var sel = document.getElementById('userSelect').value;
+  if (!sel) { alert('Please select your name'); return; }
+  CURRENT_USER = sel;
+  localStorage.setItem('lwh_user', sel);
+  document.getElementById('userPickerBg').classList.remove('open');
+  showUserChip();
+}
+
+function changeUser() {
+  document.getElementById('userSelect').value = '';
+  document.getElementById('userPickerBg').classList.add('open');
+}
+
+function showUserChip() {
+  // Show current user in nav if element exists
+  var el = document.getElementById('userChip');
+  if (el) {
+    el.innerHTML = '<span class="user-chip">Signed in as <strong>' +
+      esc(CURRENT_USER) + '</strong><button class="user-change" onclick="changeUser()">change</button></span>';
+  }
+}
+
 /* ============================================================
    SCAN STATE
 ============================================================ */
@@ -822,6 +899,7 @@ function initPolyfill() {
 /* Init on page load */
 window.addEventListener('load', function() {
   isMobile = window.innerWidth < 600;
+  initUser();
   loadStats();
   loadLocations();
   initInvSearch();
